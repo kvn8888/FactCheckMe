@@ -7,6 +7,10 @@ interface UseFactCheckerOptions {
   onError?: (error: string) => void;
 }
 
+// Throttle interval in ms - wait at least this long between API calls
+// With paid Gemini, we can be more responsive
+const THROTTLE_INTERVAL = 2000;
+
 export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<FactCheckResult[]>([]);
@@ -20,6 +24,9 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   const sessionIdRef = useRef<string | null>(null);
   const processingQueueRef = useRef<string[]>([]);
   const isProcessingRef = useRef(false);
+  const textBufferRef = useRef<string[]>([]);
+  const lastApiCallRef = useRef<number>(0);
+  const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const createSession = useCallback(async () => {
     try {
@@ -81,6 +88,12 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
           continue;
         }
 
+        // Skip if no claim was found in the speech
+        if (data.noClaim) {
+          console.log('No factual claim detected in speech');
+          continue;
+        }
+
         const result: FactCheckResult = {
           id: data.id,
           claim: data.claim,
@@ -107,39 +120,58 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
     setIsProcessing(false);
   }, [onNewResult, onError]);
 
+  const processBufferedText = useCallback(async () => {
+    if (textBufferRef.current.length === 0) return;
+
+    // Combine all buffered text into one request
+    const combinedText = textBufferRef.current.join(' ');
+    textBufferRef.current = [];
+
+    // Skip empty or very short text
+    if (combinedText.trim().length < 15) return;
+
+    try {
+      // Send directly to fact-check (it will extract and check in one call)
+      setStatus((prev) => ({
+        ...prev,
+        claimsDetected: prev.claimsDetected + 1,
+      }));
+
+      processingQueueRef.current.push(combinedText);
+      processQueue();
+    } catch (e) {
+      console.error('Text processing error:', e);
+    }
+  }, [processQueue]);
+
   const processText = useCallback(async (text: string) => {
     setStatus((prev) => ({
       ...prev,
       sentencesProcessed: prev.sentencesProcessed + 1,
     }));
 
-    try {
-      // Extract claims from the text using AI
-      const { data, error } = await supabase.functions.invoke('transcribe', {
-        body: { audioData: text },
-      });
+    // Add text to buffer
+    textBufferRef.current.push(text);
 
-      if (error || data.error) {
-        console.error('Claim extraction error:', error || data.error);
-        return;
+    // Check if we can make an API call (throttling)
+    const now = Date.now();
+    const timeSinceLastCall = now - lastApiCallRef.current;
+
+    if (timeSinceLastCall >= THROTTLE_INTERVAL) {
+      // Can call immediately
+      lastApiCallRef.current = now;
+      processBufferedText();
+    } else {
+      // Schedule a call after the throttle interval
+      if (throttleTimeoutRef.current) {
+        clearTimeout(throttleTimeoutRef.current);
       }
-
-      const claims: string[] = data.claims || [];
-
-      if (claims.length > 0) {
-        setStatus((prev) => ({
-          ...prev,
-          claimsDetected: prev.claimsDetected + claims.length,
-        }));
-
-        // Add claims to processing queue
-        processingQueueRef.current.push(...claims);
-        processQueue();
-      }
-    } catch (e) {
-      console.error('Text processing error:', e);
+      throttleTimeoutRef.current = setTimeout(() => {
+        lastApiCallRef.current = Date.now();
+        processBufferedText();
+      }, THROTTLE_INTERVAL - timeSinceLastCall);
     }
-  }, [processQueue]);
+  }, [processBufferedText]);
 
   const startMonitoring = useCallback(async () => {
     const sessionId = await createSession();
@@ -156,6 +188,17 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   }, [createSession]);
 
   const stopMonitoring = useCallback(async () => {
+    // Clear any pending throttle timeout
+    if (throttleTimeoutRef.current) {
+      clearTimeout(throttleTimeoutRef.current);
+      throttleTimeoutRef.current = null;
+    }
+
+    // Process any remaining buffered text
+    if (textBufferRef.current.length > 0) {
+      await processBufferedText();
+    }
+
     await endSession();
     sessionIdRef.current = null;
 
@@ -163,7 +206,7 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       ...prev,
       isActive: false,
     }));
-  }, [endSession]);
+  }, [endSession, processBufferedText]);
 
   const clearResults = useCallback(() => {
     setResults([]);

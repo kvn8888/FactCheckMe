@@ -22,42 +22,53 @@ serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not configured");
     }
 
-    // Call AI to fact-check the claim
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are a fact-checker. Analyze claims and determine their truthfulness.
-            
-You must respond with a valid JSON object (no markdown, no code blocks) with these fields:
-- verdict: one of "true", "false", "partial", or "unverifiable"
-- confidence: a number from 0 to 100
-- explanation: a brief explanation (1-2 sentences)
-- sources: an array of objects with title, url, and domain fields (provide 1-3 relevant sources)
+    // Retry logic for rate limits with exponential backoff
+    const makeRequest = async (retries = 3, delay = 3000): Promise<Response> => {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: `You are a real-time fact-checker for spoken audio. Analyze the following transcribed speech.
 
-Example response:
-{"verdict":"false","confidence":95,"explanation":"This is a common misconception. Scientific studies have shown...","sources":[{"title":"Scientific American","url":"https://scientificamerican.com","domain":"scientificamerican.com"}]}`
-          },
-          {
-            role: "user",
-            content: `Fact-check this claim: "${claim}"`
-          }
-        ],
-        temperature: 0.3,
-      }),
-    });
+First, identify if there's a verifiable factual claim in the text. If the text is just casual conversation, greetings, or opinions with no factual claims, respond with:
+{"hasClaim": false}
+
+If there IS a factual claim, extract the main claim and fact-check it. Respond with:
+{
+  "hasClaim": true,
+  "claim": "the extracted factual claim",
+  "verdict": "true" | "false" | "partial" | "unverifiable",
+  "confidence": 0-100,
+  "explanation": "brief 1-2 sentence explanation",
+  "sources": [{"title": "Source Name", "url": "https://example.com", "domain": "example.com"}]
+}
+
+Transcribed speech: "${claim}"`
+              }]
+            }],
+            generationConfig: { temperature: 0.3, responseMimeType: "application/json" }
+          }),
+        }
+      );
+
+      if (response.status === 429 && retries > 0) {
+        console.log(`Rate limited, retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        return makeRequest(retries - 1, delay * 2);
+      }
+      return response;
+    };
+
+    const response = await makeRequest();
 
     if (!response.ok) {
       if (response.status === 429) {
@@ -66,19 +77,13 @@ Example response:
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add funds." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
-      throw new Error("AI gateway error");
+      console.error("Gemini API error:", response.status, errorText);
+      throw new Error("Gemini API error");
     }
 
     const aiResponse = await response.json();
-    const content = aiResponse.choices?.[0]?.message?.content;
+    const content = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
       throw new Error("No response from AI");
@@ -87,18 +92,22 @@ Example response:
     // Parse the AI response
     let factCheckResult;
     try {
-      // Clean potential markdown code blocks
       const cleanContent = content.replace(/```json\n?|\n?```/g, '').trim();
       factCheckResult = JSON.parse(cleanContent);
     } catch (parseError) {
       console.error("Failed to parse AI response:", content);
-      // Fallback if parsing fails
-      factCheckResult = {
-        verdict: "unverifiable",
-        confidence: 50,
-        explanation: "Unable to verify this claim at this time.",
-        sources: []
-      };
+      return new Response(
+        JSON.stringify({ noClaim: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // If no claim found, return early
+    if (factCheckResult.hasClaim === false) {
+      return new Response(
+        JSON.stringify({ noClaim: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Validate verdict
@@ -112,11 +121,13 @@ Example response:
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    const claimText = factCheckResult.claim || claim.trim();
+
     const { data: savedResult, error: dbError } = await supabase
       .from("fact_check_results")
       .insert({
         session_id: sessionId || null,
-        claim: claim.trim(),
+        claim: claimText,
         verdict: factCheckResult.verdict,
         confidence: Math.min(100, Math.max(0, factCheckResult.confidence || 75)),
         explanation: factCheckResult.explanation || "",
@@ -127,7 +138,6 @@ Example response:
 
     if (dbError) {
       console.error("Database error:", dbError);
-      // Still return the result even if saving fails
     }
 
     // Update session claims count if session exists
@@ -137,7 +147,7 @@ Example response:
         .select("claims_checked")
         .eq("id", sessionId)
         .single();
-      
+
       if (sessionData) {
         await supabase
           .from("fact_check_sessions")
@@ -149,11 +159,11 @@ Example response:
     return new Response(
       JSON.stringify({
         id: savedResult?.id || crypto.randomUUID(),
-        claim: claim.trim(),
+        claim: claimText,
         verdict: factCheckResult.verdict,
         confidence: factCheckResult.confidence,
         explanation: factCheckResult.explanation,
-        sources: factCheckResult.sources,
+        sources: factCheckResult.sources || [],
         timestamp: savedResult?.created_at || new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
