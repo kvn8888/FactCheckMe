@@ -1,0 +1,10 @@
+project_id = "njfmdtvrgfkrcjgunyyq"
+
+[functions.elevenlabs-scribe-token]
+verify_jwt = false
+
+[functions.transcribe]
+verify_jwt = false
+
+[functions.fact-check]
+verify_jwt = false

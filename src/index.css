@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Neubrutalist Design System - Bold, Raw, Unapologetic */
+
+@layer base {
+  :root {
+    --background: 55 100% 97%;
+    --foreground: 0 0% 0%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 220 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 60 100% 70%;
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 55 30% 90%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 340 100% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 220 100% 50%;
+
+    --radius: 0.25rem;
+
+    /* Verdict Colors - Neubrutalist */
+    --verdict-true: 75 100% 50%;
+    --verdict-true-foreground: 0 0% 0%;
+    --verdict-false: 0 100% 50%;
+    --verdict-false-foreground: 0 0% 100%;
+    --verdict-partial: 45 100% 50%;
+    --verdict-partial-foreground: 0 0% 0%;
+    --verdict-unverifiable: 0 0% 75%;
+    --verdict-unverifiable-foreground: 0 0% 0%;
+
+    /* Status Colors */
+    --status-active: 75 100% 50%;
+    --status-inactive: 0 0% 60%;
+
+    --sidebar-background: 55 100% 97%;
+    --sidebar-foreground: 0 0% 0%;
+    --sidebar-primary: 220 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 340 100% 60%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 0%;
+    --sidebar-ring: 220 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Mobile optimizations */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  /* Neubrutalist utility classes */
+  .brutal-border {
+    @apply border-[3px] border-black;
+  }
+
+  .brutal-shadow {
+    box-shadow: 4px 4px 0px #000;
+  }
+
+  .brutal-shadow-sm {
+    box-shadow: 2px 2px 0px #000;
+  }
+
+  .brutal-shadow-lg {
+    box-shadow: 6px 6px 0px #000;
+  }
+
+  .brutal-shadow-xl {
+    box-shadow: 8px 8px 0px #000;
+  }
+
+  /* Interactive hover - grows shadow and shifts */
+  .brutal-hover {
+    @apply transition-all duration-150;
+  }
+
+  .brutal-hover:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0px #000;
+  }
+
+  .brutal-hover:active {
+    transform: translate(2px, 2px);
+    box-shadow: 0px 0px 0px #000;
+  }
+
+  /* Touch-friendly tap targets */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  /* Brutal pulse animation for active state */
+  .pulse-brutal {
+    animation: pulse-brutal 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-brutal {
+    0%, 100% {
+      box-shadow: 4px 4px 0px #000, 0 0 0 0 hsl(var(--status-active) / 0.7);
+    }
+    50% {
+      box-shadow: 4px 4px 0px #000, 0 0 0 12px hsl(var(--status-active) / 0);
+    }
+  }
+
+  /* Card entrance - thrown on desk effect */
+  .card-enter {
+    animation: card-brutal-in 0.3s ease-out;
+  }
+
+  @keyframes card-brutal-in {
+    from {
+      opacity: 0;
+      transform: translateY(-10px) rotate(-2deg);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) rotate(0deg);
+    }
+  }
+
+  /* Safe area padding for mobile */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+
+  /* Decorative shapes */
+  .brutal-shape {
+    @apply absolute pointer-events-none;
+  }
+
+  /* Striped background pattern */
+  .brutal-stripes {
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 5px,
+      hsl(var(--foreground) / 0.05) 5px,
+      hsl(var(--foreground) / 0.05) 10px
+    );
+  }
+}
