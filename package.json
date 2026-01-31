@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:hyperspell": "node test-hyperspell.js"
+    "test:hyperspell": "node test-hyperspell.mjs"
   },
   "dependencies": {
     "@elevenlabs/react": "^0.13.0",

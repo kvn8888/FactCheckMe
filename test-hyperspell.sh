@@ -11,9 +11,27 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration - UPDATE THESE VALUES
+# Load .env file if it exists
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+# Configuration
 SUPABASE_URL="${VITE_SUPABASE_URL:-your-project.supabase.co}"
 ANON_KEY="${VITE_SUPABASE_PUBLISHABLE_KEY:-your-anon-key}"
+
+# Validate configuration
+if [ "$SUPABASE_URL" = "your-project.supabase.co" ] || [ "$SUPABASE_URL" = "https://your-project.supabase.co" ]; then
+    echo -e "${RED}Error: SUPABASE_URL not configured${NC}"
+    echo -e "${YELLOW}Please set VITE_SUPABASE_URL in your .env file${NC}"
+    exit 1
+fi
+
+if [ "$ANON_KEY" = "your-anon-key" ]; then
+    echo -e "${RED}Error: ANON_KEY not configured${NC}"
+    echo -e "${YELLOW}Please set VITE_SUPABASE_PUBLISHABLE_KEY in your .env file${NC}"
+    exit 1
+fi
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Hyperspell Cache Testing Script${NC}"
@@ -39,8 +57,12 @@ test_claim() {
 
     # Measure time and make request
     start_time=$(date +%s%N)
+
+    # Remove https:// prefix if present
+    CLEAN_URL="${SUPABASE_URL#https://}"
+
     response=$(curl -s -X POST \
-        "https://${SUPABASE_URL}/functions/v1/fact-check" \
+        "https://${CLEAN_URL}/functions/v1/fact-check" \
         -H "apikey: ${ANON_KEY}" \
         -H "Content-Type: application/json" \
         -d "{\"claim\": \"${claim}\"}")

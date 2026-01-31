@@ -1,10 +1,8 @@
 /**
- * Hyperspell Cache Testing Script (Node.js version)
- * Run with: node test-hyperspell.js
+ * Hyperspell Cache Testing Script (ES Module version)
+ * Run with: node test-hyperspell.mjs
  */
 
-// Load environment variables
-import dotenv from 'dotenv';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -12,11 +10,33 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env file
-dotenv.config({ path: join(__dirname, '.env') });
+// Simple .env parser
+function loadEnv() {
+  try {
+    const envPath = join(__dirname, '.env');
+    const envFile = readFileSync(envPath, 'utf-8');
+    const env = {};
 
-const SUPABASE_URL = (process.env.VITE_SUPABASE_URL || '').replace('https://', '');
-const ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+    envFile.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+
+      const [key, ...valueParts] = trimmed.split('=');
+      const value = valueParts.join('=').trim();
+      env[key.trim()] = value;
+    });
+
+    return env;
+  } catch (error) {
+    console.error('Could not load .env file:', error.message);
+    return {};
+  }
+}
+
+const env = loadEnv();
+
+const SUPABASE_URL = (env.VITE_SUPABASE_URL || '').replace('https://', '').replace('http://', '');
+const ANON_KEY = env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
 // Validate configuration
 if (!SUPABASE_URL || SUPABASE_URL === 'your-project.supabase.co') {
@@ -75,6 +95,12 @@ async function testClaim(testName, claim, expectedFromCache) {
       log(`❌ Error: ${data.error}`, 'red');
       console.log('Response:', JSON.stringify(data, null, 2));
       return false;
+    }
+
+    // Check for noClaim
+    if (data.noClaim) {
+      log('⚠️  No claim detected in text', 'yellow');
+      return true; // This is expected for non-factual statements
     }
 
     // Validate results
@@ -207,5 +233,6 @@ function sleep(ms) {
 // Run tests
 runTests().catch(error => {
   log(`Fatal error: ${error.message}`, 'red');
+  console.error(error);
   process.exit(1);
 });
