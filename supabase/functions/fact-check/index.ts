@@ -42,18 +42,23 @@ serve(async (req) => {
 First, identify if there's a verifiable factual claim in the text. If the text is just casual conversation, greetings, or opinions with no factual claims, respond with:
 {"hasClaim": false}
 
-If there IS a factual claim, extract the main claim and fact-check it. Respond with:
+If there IS a factual claim, extract the main claim and fact-check it using the Google Search results provided. Respond with:
 {
   "hasClaim": true,
   "claim": "the extracted factual claim",
   "verdict": "true" | "false" | "partial" | "unverifiable",
   "confidence": 0-100,
-  "explanation": "brief 1-2 sentence explanation",
+  "explanation": "brief 1-2 sentence explanation citing the search results",
   "sources": [{"title": "Source Name", "url": "https://example.com", "domain": "example.com"}]
 }
 
+IMPORTANT: Use the Google Search results to verify the claim. Include the actual URLs from the search results in your sources array.
+
 Transcribed speech: "${claim}"`
               }]
+            }],
+            tools: [{
+              googleSearchRetrieval: {}
             }],
             generationConfig: { temperature: 0.3, responseMimeType: "application/json" }
           }),
@@ -89,6 +94,12 @@ Transcribed speech: "${claim}"`
       throw new Error("No response from AI");
     }
 
+    // Extract grounding metadata (Google Search results)
+    const groundingMetadata = aiResponse.candidates?.[0]?.groundingMetadata;
+    const groundingSupports = groundingMetadata?.groundingSupports || [];
+
+    console.log("Grounding metadata:", JSON.stringify(groundingMetadata, null, 2));
+
     // Parse the AI response
     let factCheckResult;
     try {
@@ -100,6 +111,27 @@ Transcribed speech: "${claim}"`
         JSON.stringify({ noClaim: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Enhance sources with actual Google Search results from grounding
+    if (groundingSupports.length > 0 && factCheckResult.hasClaim) {
+      const groundedSources = groundingSupports
+        .filter((support: any) => support.segment)
+        .map((support: any) => {
+          const chunk = support.groundingChunkIndices?.[0];
+          const webChunk = groundingMetadata?.webSearchQueries?.[chunk] || groundingMetadata?.retrievalMetadata?.webDynamicRetrievalScore;
+          return {
+            title: support.segment?.text?.substring(0, 100) || "Search Result",
+            url: webChunk?.uri || support.uri || "",
+            domain: webChunk?.uri ? new URL(webChunk.uri).hostname : ""
+          };
+        })
+        .filter((source: any) => source.url);
+
+      // Merge AI-provided sources with grounded sources
+      if (groundedSources.length > 0) {
+        factCheckResult.sources = [...groundedSources, ...(factCheckResult.sources || [])];
+      }
     }
 
     // If no claim found, return early

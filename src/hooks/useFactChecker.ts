@@ -188,24 +188,33 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   }, [createSession]);
 
   const stopMonitoring = useCallback(async () => {
-    // Clear any pending throttle timeout
+    // Process any remaining buffered text immediately
+    if (textBufferRef.current.length > 0) {
+      await processBufferedText();
+    }
+
+    // Clear throttle timeout (no more new text will be processed)
     if (throttleTimeoutRef.current) {
       clearTimeout(throttleTimeoutRef.current);
       throttleTimeoutRef.current = null;
     }
 
-    // Process any remaining buffered text
-    if (textBufferRef.current.length > 0) {
-      await processBufferedText();
-    }
-
-    await endSession();
-    sessionIdRef.current = null;
-
+    // Mark monitoring as inactive, but let processing continue in background
     setStatus((prev) => ({
       ...prev,
       isActive: false,
     }));
+
+    // End session after a delay to allow background processing to complete
+    // This doesn't block the UI - session just gets marked as ended later
+    setTimeout(async () => {
+      // Wait for processing to finish before ending session
+      while (isProcessingRef.current || processingQueueRef.current.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await endSession();
+      sessionIdRef.current = null;
+    }, 0);
   }, [endSession, processBufferedText]);
 
   const clearResults = useCallback(() => {

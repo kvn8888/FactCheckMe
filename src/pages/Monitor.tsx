@@ -45,17 +45,29 @@ export default function Monitor() {
 
   const handleToggleListening = useCallback(async () => {
     if (isListening) {
+      // Stop listening first (immediate)
       stopListening();
-      await stopMonitoring();
-      toast.success('Monitoring stopped');
+      toast.success('Stopped listening');
+
+      // Stop monitoring in background (processing continues)
+      stopMonitoring();
+
+      if (isProcessing) {
+        toast.info('Still processing claims in background...', {
+          duration: 3000,
+        });
+      }
     } else {
+      // Start monitoring session
       await startMonitoring();
+
+      // Start listening
       const started = await startListening();
       if (started) {
         toast.success('Now listening for claims...');
       }
     }
-  }, [isListening, startListening, stopListening, startMonitoring, stopMonitoring]);
+  }, [isListening, isProcessing, startListening, stopListening, startMonitoring, stopMonitoring]);
 
   return (
     <div className="flex flex-col h-full">
@@ -66,11 +78,13 @@ export default function Monitor() {
         </h1>
         <div className="inline-block px-4 py-1 bg-muted border-[3px] border-foreground shadow-brutal-sm">
           <p className="text-sm font-bold uppercase text-muted-foreground">
-            {isConnecting 
-              ? '⏳ CONNECTING...' 
-              : isProcessing 
-                ? '🔍 ANALYZING...' 
-                : '📡 REAL-TIME VERIFICATION'}
+            {isConnecting
+              ? '⏳ CONNECTING...'
+              : isProcessing
+                ? '🔍 ANALYZING...'
+                : isListening
+                  ? '📡 REAL-TIME VERIFICATION'
+                  : '⏸️ READY'}
           </p>
         </div>
       </header>
@@ -101,6 +115,14 @@ export default function Monitor() {
       {/* Status Bar */}
       <div className="px-4 mb-4">
         <StatusBar status={status} />
+        {!isListening && isProcessing && (
+          <div className="mt-2 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 border-[2px] border-yellow-500 rounded">
+            <p className="text-xs font-bold text-yellow-800 dark:text-yellow-200 flex items-center gap-2">
+              <span className="animate-pulse">⚡</span>
+              Processing claims in background...
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Results Feed */}
