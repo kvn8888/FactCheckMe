@@ -7,6 +7,79 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Hyperspell API endpoint
+const HYPERSPELL_API_URL = "https://api.hyperspell.com/v1";
+
+// Similarity threshold for cache hits (0.85 = 85% similarity)
+const CACHE_SIMILARITY_THRESHOLD = 0.85;
+
+// Search Hyperspell cache for similar claims
+async function searchHyperspellCache(claim: string, apiKey: string) {
+  try {
+    const response = await fetch(`${HYPERSPELL_API_URL}/memories/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        query: claim,
+        limit: 1,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Hyperspell search failed:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const topResult = data.memories?.[0];
+
+    if (topResult && topResult.score >= CACHE_SIMILARITY_THRESHOLD) {
+      return JSON.parse(topResult.text);
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Hyperspell search error:", error);
+    return null;
+  }
+}
+
+// Add a fact-check result to Hyperspell cache
+async function addToHyperspellCache(factCheckResult: any, apiKey: string) {
+  try {
+    const response = await fetch(`${HYPERSPELL_API_URL}/memories`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        text: JSON.stringify({
+          claim: factCheckResult.claim,
+          verdict: factCheckResult.verdict,
+          confidence: factCheckResult.confidence,
+          explanation: factCheckResult.explanation,
+          sources: factCheckResult.sources,
+          checkedAt: new Date().toISOString(),
+        }),
+        metadata: {
+          type: "fact-check",
+          verdict: factCheckResult.verdict,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Hyperspell add failed:", response.status);
+    }
+  } catch (error) {
+    console.error("Hyperspell add error:", error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -25,6 +98,31 @@ serve(async (req) => {
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) {
       throw new Error("GEMINI_API_KEY is not configured");
+    }
+
+    // Check Hyperspell cache first
+    const HYPERSPELL_API_KEY = Deno.env.get("HYPERSPELL_API_KEY");
+    if (HYPERSPELL_API_KEY) {
+      const cachedResult = await searchHyperspellCache(claim, HYPERSPELL_API_KEY);
+
+      if (cachedResult) {
+        console.log("Cache hit for claim:", claim);
+
+        // Return cached result with cache indicator
+        return new Response(
+          JSON.stringify({
+            id: crypto.randomUUID(),
+            claim: cachedResult.claim,
+            verdict: cachedResult.verdict,
+            confidence: cachedResult.confidence,
+            explanation: cachedResult.explanation,
+            sources: cachedResult.sources || [],
+            timestamp: new Date().toISOString(),
+            fromCache: true,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Retry logic for rate limits with exponential backoff
@@ -148,6 +246,11 @@ Transcribed speech: "${claim}"`
       factCheckResult.verdict = "unverifiable";
     }
 
+    // Save to Hyperspell cache for future lookups
+    if (HYPERSPELL_API_KEY) {
+      await addToHyperspellCache(factCheckResult, HYPERSPELL_API_KEY);
+    }
+
     // Save to database
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -197,6 +300,7 @@ Transcribed speech: "${claim}"`
         explanation: factCheckResult.explanation,
         sources: factCheckResult.sources || [],
         timestamp: savedResult?.created_at || new Date().toISOString(),
+        fromCache: false,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
