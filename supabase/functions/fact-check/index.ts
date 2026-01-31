@@ -37,30 +37,24 @@ serve(async (req) => {
           body: JSON.stringify({
             contents: [{
               parts: [{
-                text: `You are a real-time fact-checker for spoken audio. Analyze the following transcribed speech.
+                text: `You are a real-time fact-checker. Use Google Search to verify the following claim and respond with ONLY a JSON object (no markdown, no explanation outside JSON).
 
-First, identify if there's a verifiable factual claim in the text. If the text is just casual conversation, greetings, or opinions with no factual claims, respond with:
-{"hasClaim": false}
+If the text has no verifiable factual claim, respond exactly: {"hasClaim": false}
 
-If there IS a factual claim, extract the main claim and fact-check it using the Google Search results provided. Respond with:
-{
-  "hasClaim": true,
-  "claim": "the extracted factual claim",
-  "verdict": "true" | "false" | "partial" | "unverifiable",
-  "confidence": 0-100,
-  "explanation": "brief 1-2 sentence explanation citing the search results",
-  "sources": [{"title": "Source Name", "url": "https://example.com", "domain": "example.com"}]
-}
+If there IS a factual claim, search for it and respond with this exact JSON format:
+{"hasClaim": true, "claim": "extracted claim", "verdict": "true", "confidence": 85, "explanation": "brief explanation", "sources": [{"title": "Source", "url": "https://...", "domain": "example.com"}]}
 
-IMPORTANT: Use the Google Search results to verify the claim. Include the actual URLs from the search results in your sources array.
+verdict must be one of: "true", "false", "partial", "unverifiable"
+confidence must be 0-100
+Include real URLs from your search results in sources.
 
-Transcribed speech: "${claim}"`
+Claim to verify: "${claim}"`
               }]
             }],
             tools: [{
-              googleSearchRetrieval: {}
+              google_search: {}
             }],
-            generationConfig: { temperature: 0.3, responseMimeType: "application/json" }
+            generationConfig: { temperature: 0.3 }
           }),
         }
       );
@@ -84,7 +78,7 @@ Transcribed speech: "${claim}"`
       }
       const errorText = await response.text();
       console.error("Gemini API error:", response.status, errorText);
-      throw new Error("Gemini API error");
+      throw new Error(`Gemini API error: ${errorText}`);
     }
 
     const aiResponse = await response.json();
