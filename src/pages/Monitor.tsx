@@ -7,9 +7,12 @@ import { useElevenLabsSTT } from '@/hooks/useElevenLabsSTT';
 import { useFactChecker } from '@/hooks/useFactChecker';
 import { toast } from 'sonner';
 import type { FactCheckResult } from '@/types/factCheck';
+import { cn } from '@/lib/utils';
+import { getTranscriptTone } from '@/lib/transcriptHighlight';
 
 export default function Monitor() {
   const [newResultId, setNewResultId] = useState<string | null>(null);
+  const [transcriptLines, setTranscriptLines] = useState<string[]>([]);
 
   const handleNewResult = useCallback((result: FactCheckResult) => {
     setNewResultId(result.id);
@@ -32,6 +35,14 @@ export default function Monitor() {
     onError: handleError,
   });
 
+  const handleTranscript = useCallback(
+    (text: string) => {
+      setTranscriptLines((prev) => [text, ...prev].slice(0, 20));
+      processText(text);
+    },
+    [processText]
+  );
+
   const {
     isListening,
     isConnecting,
@@ -39,7 +50,7 @@ export default function Monitor() {
     stopListening,
     partialTranscript,
   } = useElevenLabsSTT({
-    onTranscript: processText,
+    onTranscript: handleTranscript,
     onError: handleError,
   });
 
@@ -60,6 +71,7 @@ export default function Monitor() {
     } else {
       // Start monitoring session
       await startMonitoring();
+      setTranscriptLines([]);
 
       // Start listening
       const started = await startListening();
@@ -99,15 +111,37 @@ export default function Monitor() {
       </div>
 
       {/* Live Transcript Preview */}
-      {isListening && partialTranscript && (
-        <div className="px-4 mb-4">
+      {(isListening || transcriptLines.length > 0) && (
+        <div className="px-4 mb-4 space-y-2">
           <div className="bg-secondary border-[3px] border-foreground shadow-brutal p-4">
             <p className="text-xs font-black uppercase tracking-wide mb-2 text-secondary-foreground">
-              👂 HEARING...
+              📝 LIVE TRANSCRIPT
             </p>
-            <p className="text-base font-bold text-secondary-foreground">
-              "{partialTranscript}"
-            </p>
+            {transcriptLines.length === 0 ? (
+              <p className="text-base font-bold text-secondary-foreground">Listening for speech...</p>
+            ) : (
+              <div className="space-y-2 max-h-44 overflow-y-auto">
+                {transcriptLines.map((line, index) => {
+                  const tone = getTranscriptTone(line, results);
+                  return (
+                    <p
+                      key={`${index}-${line}`}
+                      className={cn(
+                        'text-sm font-bold text-secondary-foreground',
+                        tone === 'misinformation' &&
+                          'underline decoration-wavy underline-offset-4 decoration-red-500',
+                        tone === 'clarification' && 'bg-yellow-200/80 dark:bg-yellow-700/40 px-1'
+                      )}
+                    >
+                      {line}
+                    </p>
+                  );
+                })}
+              </div>
+            )}
+            {isListening && partialTranscript && (
+              <p className="text-sm text-secondary-foreground/80 mt-2">… {partialTranscript}</p>
+            )}
           </div>
         </div>
       )}

@@ -19,8 +19,8 @@ FactCheckMe is a real-time fact-checking tool that helps voters cut through misi
 - Vite
 - Tailwind CSS
 - shadcn/ui
-- Supabase (Database & Edge Functions)
-- ElevenLabs API (Speech-to-Text)
+- Supabase or Azure-backed DB provider (via env configuration)
+- ElevenLabs or Azure real-time transcription provider (via env configuration)
 - Google Gemini 2.0 (AI + Search Grounding)
 - Hyperspell (Semantic Cache)
 
@@ -33,11 +33,20 @@ npm install
 
 ### 2. Configure Environment Variables
 
-Set up the following secrets in Supabase Dashboard (Project Settings > Edge Functions > Secrets):
+Copy `.env.example` to `.env` and set providers explicitly:
+
+- `VITE_DB_PROVIDER` (`supabase` or `azure`)
+- `VITE_TRANSCRIPTION_PROVIDER` (`elevenlabs` or `azure`)
+- `VITE_BACKEND_DB_URL`
+- `VITE_BACKEND_DB_PUBLISHABLE_KEY`
+
+Server-side secrets (in your backend host / function environment):
 
 - `GEMINI_API_KEY` - Get from [Google AI Studio](https://ai.google.dev)
 - `ELEVENLABS_API_KEY` - Get from [ElevenLabs](https://elevenlabs.io)
 - `HYPERSPELL_API_KEY` - Get from [Hyperspell](https://app.hyperspell.com)
+- `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` (for Azure speech)
+- `AZURE_DB_CONNECTION_STRING` (for Azure DB)
 
 ### 3. What is Hyperspell?
 
@@ -62,3 +71,39 @@ npm run dev
 - `npm run build` - Build for production
 - `npm run test` - Run tests
 - `npm run lint` - Run linter
+
+## Real-time transcript UX
+
+During monitoring, live transcript lines are shown in the Monitor view:
+
+- **Red squiggly underline** = fact-check verdict is misinformation (`false`)
+- **Yellow highlight** = claim needs clarification (`partial`/`unverifiable`)
+
+## Project structure
+
+Core app code lives in:
+
+- `src/pages` - Route-level pages
+- `src/components` - Shared UI
+- `src/hooks` - Streaming and fact-check behavior
+- `src/lib` - Reusable helpers (including transcript highlighting)
+- `src/integrations` - Provider clients (Supabase/DB integrations)
+
+## Claude skill
+
+A Claude skill for frontend design and project structure guidance is available at:
+
+- `.claude/skills/frontend-design-and-structure/SKILL.md`
+
+## Deploying on Render
+
+1. Create a new **Static Site** in Render and connect this repo.
+2. Set:
+   - Build command: `npm ci && npm run build`
+   - Publish directory: `dist`
+3. Add env vars from `.env.example` (`VITE_*` values for frontend build-time config).
+4. If using Supabase edge functions, deploy/update them separately in Supabase.
+5. Trigger deploy and verify:
+   - Monitor page loads
+   - Microphone permission prompt appears
+   - Transcript and fact-check cards render in real time
