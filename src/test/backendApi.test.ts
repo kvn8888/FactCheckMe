@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { backendPost } from '@/services/backendApi';
+import { backendPost, DEFAULT_API_BASE_URL } from '@/services/backendApi';
 
 describe('backendPost', () => {
   beforeEach(() => {
@@ -14,16 +14,20 @@ describe('backendPost', () => {
     const response = await backendPost<{ token: string }>('/api/elevenlabs-scribe-token');
     expect(response.token).toBe('abc');
     expect(fetchSpy).toHaveBeenCalledWith(
-      'http://localhost:8787/api/elevenlabs-scribe-token',
+      `${DEFAULT_API_BASE_URL}/api/elevenlabs-scribe-token`,
       expect.objectContaining({ method: 'POST' })
     );
   });
 
   it('throws backend error message when request fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'No token' }), { status: 500 })
     );
 
     await expect(backendPost('/api/elevenlabs-scribe-token')).rejects.toThrow('No token');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `${DEFAULT_API_BASE_URL}/api/elevenlabs-scribe-token`,
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 });

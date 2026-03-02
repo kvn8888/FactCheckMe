@@ -4,7 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 
 const PORT = Number(process.env.PORT || 8787);
 const HYPERSPELL_API_URL = 'https://api.hyperspell.com/v1';
+// 0.85 gives semantic reuse for near-duplicate claims while avoiding broad false cache hits.
 const CACHE_SIMILARITY_THRESHOLD = 0.85;
+const MAX_INCREMENT_RETRIES = 3;
+const DEFAULT_CONFIDENCE = 75;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,6 +27,12 @@ const readJson = async (req) => {
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
 };
+
+const sanitizeClaimForPrompt = (claim) =>
+  claim
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[<>`]/g, '')
+    .trim();
 
 async function searchHyperspellCache(claim, apiKey) {
   try {
@@ -74,10 +83,14 @@ async function addToHyperspellCache(result, apiKey) {
 }
 
 const makeGeminiFactCheck = async (claim, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  const safeClaim = sanitizeClaimForPrompt(claim);
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
     body: JSON.stringify({
       contents: [{
         parts: [{
@@ -88,7 +101,7 @@ If there IS a factual claim, search for it and respond with this exact JSON form
 verdict must be one of: "true", "false", "partial", "unverifiable"
 confidence must be 0-100
 Include real URLs from your search results in sources.
-Claim to verify: "${claim}"`,
+Claim to verify: "${safeClaim}"`,
         }],
       }],
       tools: [{ google_search: {} }],
@@ -106,8 +119,11 @@ Claim to verify: "${claim}"`,
   if (!content) throw new Error('No response from AI');
 
   const cleanContent = content.replace(/```json\n?|\n?```/g, '').trim();
-  const parsed = JSON.parse(cleanContent);
-  return parsed;
+  try {
+    return JSON.parse(cleanContent);
+  } catch {
+    throw new Error('Gemini returned unparseable JSON');
+  }
 };
 
 const getServerSupabase = () => {
@@ -115,6 +131,35 @@ const getServerSupabase = () => {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return null;
   return createClient(supabaseUrl, serviceKey);
+};
+
+const incrementSessionClaimsChecked = async (supabase, sessionId) => {
+  for (let attempt = 0; attempt < MAX_INCREMENT_RETRIES; attempt += 1) {
+    const session = await supabase
+      .from('fact_check_sessions')
+      .select('claims_checked')
+      .eq('id', sessionId)
+      .single();
+
+    if (session.error || !session.data) {
+      console.warn('Session lookup failed while incrementing claims_checked:', session.error?.message);
+      return;
+    }
+
+    const currentClaimsChecked = session.data.claims_checked ?? 0;
+    const update = await supabase
+      .from('fact_check_sessions')
+      .update({ claims_checked: currentClaimsChecked + 1 })
+      .eq('id', sessionId)
+      .eq('claims_checked', currentClaimsChecked)
+      .select('id');
+
+    if (!update.error && update.data && update.data.length > 0) {
+      return;
+    }
+  }
+
+  console.warn('Failed to increment claims_checked after retries for session:', sessionId);
 };
 
 const handler = async (req, res) => {
@@ -182,6 +227,7 @@ const handler = async (req, res) => {
 
       const validVerdicts = ['true', 'false', 'partial', 'unverifiable'];
       if (!validVerdicts.includes(factCheckResult.verdict)) {
+        console.warn('Invalid verdict from model, defaulting to "unverifiable":', factCheckResult.verdict);
         factCheckResult.verdict = 'unverifiable';
       }
 
@@ -190,7 +236,7 @@ const handler = async (req, res) => {
       }
 
       const claimText = factCheckResult.claim || claim.trim();
-      const confidence = Math.min(100, Math.max(0, factCheckResult.confidence || 75));
+      const confidence = Math.min(100, Math.max(0, factCheckResult.confidence || DEFAULT_CONFIDENCE));
       let savedResult = null;
       const supabase = getServerSupabase();
 
@@ -208,21 +254,14 @@ const handler = async (req, res) => {
           .select()
           .single();
 
+        if (insert.error) {
+          return json(res, 500, { error: `Database insert failed: ${insert.error.message}` });
+        }
+
         savedResult = insert.data ?? null;
 
         if (sessionId) {
-          const session = await supabase
-            .from('fact_check_sessions')
-            .select('claims_checked')
-            .eq('id', sessionId)
-            .single();
-
-          if (session.data) {
-            await supabase
-              .from('fact_check_sessions')
-              .update({ claims_checked: (session.data.claims_checked || 0) + 1 })
-              .eq('id', sessionId);
-          }
+          await incrementSessionClaimsChecked(supabase, sessionId);
         }
       }
 
