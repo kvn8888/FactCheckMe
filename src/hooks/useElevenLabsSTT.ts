@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useScribe, CommitStrategy } from '@elevenlabs/react';
-import { supabase } from '@/integrations/supabase/client';
+import { backendPost } from '@/services/backendApi';
 
 interface UseElevenLabsSTTOptions {
   onTranscript: (text: string) => void;
@@ -71,13 +71,8 @@ export function useElevenLabsSTT({ onTranscript, onError }: UseElevenLabsSTTOpti
       // Request microphone permission first
       await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Get token from edge function
-      const { data, error } = await supabase.functions.invoke('elevenlabs-scribe-token');
-
-      if (error) {
-        throw new Error(error.message || 'Failed to get scribe token');
-      }
-
+      // Get token from persistent Node backend
+      const data = await backendPost<{ token?: string }>('/api/elevenlabs-scribe-token');
       if (!data?.token) {
         throw new Error('No token received from server');
       }
