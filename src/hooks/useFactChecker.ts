@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { FactCheckResult, MonitoringStatus } from '@/types/factCheck';
+import { backendPost } from '@/services/backendApi';
 
 interface UseFactCheckerOptions {
   onNewResult?: (result: FactCheckResult) => void;
@@ -73,15 +74,20 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       const claim = processingQueueRef.current.shift()!;
 
       try {
-        const { data, error } = await supabase.functions.invoke('fact-check', {
-          body: { claim, sessionId: sessionIdRef.current },
+        const data = await backendPost<{
+          id: string;
+          claim: string;
+          verdict: FactCheckResult['verdict'];
+          confidence: number;
+          explanation?: string;
+          sources?: FactCheckResult['sources'];
+          timestamp: string;
+          noClaim?: boolean;
+          error?: string;
+        }>('/api/fact-check', {
+          claim,
+          sessionId: sessionIdRef.current,
         });
-
-        if (error) {
-          console.error('Fact-check error:', error);
-          onError?.(error.message || 'Failed to fact-check claim');
-          continue;
-        }
 
         if (data.error) {
           onError?.(data.error);

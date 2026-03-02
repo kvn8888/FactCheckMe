@@ -40,7 +40,7 @@ Copy `.env.example` to `.env` and set providers explicitly:
 - `VITE_BACKEND_DB_URL`
 - `VITE_BACKEND_DB_PUBLISHABLE_KEY`
 
-Server-side secrets (in your backend host / function environment):
+Server-side secrets (in your persistent Node.js backend environment):
 
 - `GEMINI_API_KEY` - Get from [Google AI Studio](https://ai.google.dev)
 - `ELEVENLABS_API_KEY` - Get from [ElevenLabs](https://elevenlabs.io)
@@ -62,12 +62,14 @@ Without Hyperspell, every claim gets verified fresh. With Hyperspell, the second
 
 ### 4. Start Development Server
 ```bash
+npm run dev:backend
 npm run dev
 ```
 
 ## Scripts
 
 - `npm run dev` - Start development server
+- `npm run dev:backend` - Start persistent Node.js backend
 - `npm run build` - Build for production
 - `npm run test` - Run tests
 - `npm run lint` - Run linter
@@ -95,14 +97,20 @@ A Claude skill for frontend design and project structure guidance is available a
 
 - `.claude/skills/frontend-design-and-structure/SKILL.md`
 
+## Technical retrospective
+
+- `TECHNICAL_RETROSPECTIVE.md` documents the edge-function-to-node migration with implementation guidance for interns/new grads.
+
 ## Deploying on Render
 
 1. Create a new **Static Site** in Render and connect this repository.
-2. Set:
+2. Create a new **Web Service** in Render from this repository for the backend:
+   - Start command: `npm run dev:backend`
+   - Add backend env vars (`GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, optional `HYPERSPELL_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`)
+3. For the static site set:
    - Build command: `npm ci && npm run build`
    - Publish directory: `dist`
-3. Add env vars from `.env.example` (`VITE_*` values for frontend build-time config).
-4. If using Supabase edge functions, deploy/update them separately in Supabase.
+4. Set `VITE_API_BASE_URL` in the static site environment to the backend Web Service URL.
 5. Trigger deploy and verify:
    - Monitor page loads
    - Microphone permission prompt appears
