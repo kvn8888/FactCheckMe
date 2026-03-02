@@ -97,7 +97,7 @@ A Claude skill for frontend design and project structure guidance is available a
 
 ## Deploying on Render
 
-1. Create a new **Static Site** in Render and connect this repo.
+1. Create a new **Static Site** in Render and connect this repository.
 2. Set:
    - Build command: `npm ci && npm run build`
    - Publish directory: `dist`

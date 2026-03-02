@@ -10,9 +10,11 @@ import type { FactCheckResult } from '@/types/factCheck';
 import { cn } from '@/lib/utils';
 import { getTranscriptTone } from '@/lib/transcriptHighlight';
 
+const MAX_TRANSCRIPT_LINES = 20;
+
 export default function Monitor() {
   const [newResultId, setNewResultId] = useState<string | null>(null);
-  const [transcriptLines, setTranscriptLines] = useState<string[]>([]);
+  const [transcriptLines, setTranscriptLines] = useState<Array<{ id: string; text: string }>>([]);
 
   const handleNewResult = useCallback((result: FactCheckResult) => {
     setNewResultId(result.id);
@@ -37,7 +39,10 @@ export default function Monitor() {
 
   const handleTranscript = useCallback(
     (text: string) => {
-      setTranscriptLines((prev) => [text, ...prev].slice(0, 20));
+      setTranscriptLines((prev) => [
+        { id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`, text },
+        ...prev,
+      ].slice(0, MAX_TRANSCRIPT_LINES));
       processText(text);
     },
     [processText]
@@ -121,11 +126,11 @@ export default function Monitor() {
               <p className="text-base font-bold text-secondary-foreground">Listening for speech...</p>
             ) : (
               <div className="space-y-2 max-h-44 overflow-y-auto">
-                {transcriptLines.map((line, index) => {
-                  const tone = getTranscriptTone(line, results);
+                {transcriptLines.map((line) => {
+                  const tone = getTranscriptTone(line.text, results);
                   return (
                     <p
-                      key={`${index}-${line}`}
+                      key={line.id}
                       className={cn(
                         'text-sm font-bold text-secondary-foreground',
                         tone === 'misinformation' &&
@@ -133,7 +138,7 @@ export default function Monitor() {
                         tone === 'clarification' && 'bg-yellow-200/80 dark:bg-yellow-700/40 px-1'
                       )}
                     >
-                      {line}
+                      {line.text}
                     </p>
                   );
                 })}
