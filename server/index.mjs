@@ -102,7 +102,22 @@ const getTrueFoundryConfig = () => {
   if (!gatewayBaseUrl) throw new Error('TRUEFOUNDRY_GATEWAY_BASE_URL is not configured');
   if (!model) throw new Error('TRUEFOUNDRY_MODEL_ID is not configured');
 
-  return { apiKey, gatewayBaseUrl, model };
+  return {
+    apiKey,
+    gatewayBaseUrl,
+    model,
+    agentAppId: process.env.TRUEFOUNDRY_AGENT_APP_ID || null,
+    mcpServerFqn: process.env.TRUEFOUNDRY_MCP_SERVER_FQN || null,
+    mcpServerUrl: process.env.TRUEFOUNDRY_MCP_SERVER_URL || null,
+    mcpToolNames: (process.env.TRUEFOUNDRY_MCP_TOOL_NAMES || '')
+      .split(',')
+      .map((tool) => tool.trim())
+      .filter(Boolean),
+    agentIterationLimit: Math.min(
+      20,
+      Math.max(1, Number(process.env.TRUEFOUNDRY_AGENT_ITERATION_LIMIT) || 5),
+    ),
+  };
 };
 
 const extractJsonObject = (content) => {
@@ -126,6 +141,78 @@ const hasGatewayCacheHit = (usage = {}) => {
     usage.cache_read_input_tokens > 0 ||
     usage.cache_creation_input_tokens > 0,
   );
+};
+
+const shouldUseTrueFoundryAgent = ({ agentAppId, mcpServerFqn, mcpServerUrl }) =>
+  Boolean(agentAppId || mcpServerFqn || mcpServerUrl);
+
+const buildFactCheckMessages = (safeClaim) => [
+  {
+    role: 'system',
+    content: `You are a real-time fact-checker. Use Tavily MCP/web search tools before deciding factual claims. Respond with ONLY a JSON object and no markdown.
+If the text has no verifiable factual claim, respond exactly: {"hasClaim": false}
+If there IS a factual claim, use Tavily search results and respond with this exact JSON format:
+{"hasClaim": true, "claim": "extracted claim", "verdict": "true", "confidence": 85, "explanation": "brief explanation", "sources": [{"title": "Source", "url": "https://...", "domain": "example.com"}]}
+verdict must be one of: "true", "false", "partial", "unverifiable"
+confidence must be 0-100
+Include real URLs from Tavily-backed search results in sources. If source URLs are unavailable, return an empty sources array rather than inventing URLs.`,
+  },
+  {
+    role: 'user',
+    content: `Claim to verify: "${safeClaim}"`,
+  },
+];
+
+const parseGatewayContent = async (response) => {
+  const body = await response.text();
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('text/event-stream') || body.trimStart().startsWith('data:')) {
+    let content = '';
+    let lastChunk = null;
+
+    for (const line of body.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+
+      try {
+        const chunk = JSON.parse(data);
+        lastChunk = chunk;
+        content += chunk.choices?.[0]?.delta?.content || '';
+        content += chunk.choices?.[0]?.message?.content || '';
+      } catch {
+        // Ignore keepalive or non-JSON SSE lines.
+      }
+    }
+
+    return {
+      raw: lastChunk || {},
+      content,
+    };
+  }
+
+  const raw = body ? JSON.parse(body) : {};
+  return {
+    raw,
+    content: raw.choices?.[0]?.message?.content || raw.choices?.[0]?.delta?.content || raw.output_text || '',
+  };
+};
+
+const buildMcpServers = ({ mcpServerFqn, mcpServerUrl, mcpToolNames }) => {
+  if (!mcpServerFqn && !mcpServerUrl) return [];
+
+  const server = {
+    enable_all_tools: mcpToolNames.length === 0,
+  };
+
+  if (mcpServerFqn) server.integration_fqn = mcpServerFqn;
+  if (mcpServerUrl) server.url = mcpServerUrl;
+  if (mcpToolNames.length > 0) {
+    server.tools = mcpToolNames.map((name) => ({ name }));
+  }
+
+  return [server];
 };
 
 const getMistralConfig = () => {
@@ -242,36 +329,53 @@ async function transcribeAudio(audioData, mimeType) {
 }
 
 async function makeGatewayFactCheck(claim) {
-  const { apiKey, gatewayBaseUrl, model } = getTrueFoundryConfig();
+  const config = getTrueFoundryConfig();
+  const { apiKey, gatewayBaseUrl, model } = config;
   const safeClaim = sanitizeClaimForPrompt(claim);
-  const response = await fetch(`${gatewayBaseUrl}/chat/completions`, {
+  const messages = buildFactCheckMessages(safeClaim);
+  const useAgent = shouldUseTrueFoundryAgent(config);
+  const endpoint = config.agentAppId
+    ? `${gatewayBaseUrl}/agent/${config.agentAppId}/responses`
+    : useAgent
+      ? `${gatewayBaseUrl}/agent/responses`
+      : `${gatewayBaseUrl}/chat/completions`;
+  const body = config.agentAppId
+    ? {
+        iteration_limit: config.agentIterationLimit,
+        response_format: { type: 'json_object' },
+        messages,
+        stream: false,
+      }
+    : useAgent
+      ? {
+          model,
+          iteration_limit: config.agentIterationLimit,
+          response_format: { type: 'json_object' },
+          messages,
+          mcp_servers: buildMcpServers(config),
+          temperature: 0.3,
+          stream: false,
+        }
+      : {
+          model,
+          temperature: 0.3,
+          response_format: { type: 'json_object' },
+          messages,
+        };
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
-      'X-TFY-METADATA': JSON.stringify({ app: 'FactCheckMe', feature: 'fact-check' }),
+      'X-TFY-METADATA': JSON.stringify({
+        app: 'FactCheckMe',
+        feature: 'fact-check',
+        mode: useAgent ? 'agent-mcp' : 'chat',
+      }),
       'X-TFY-LOGGING-CONFIG': JSON.stringify({ enabled: true }),
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a real-time fact-checker. Use source-aware or web-search-capable model behavior when available. Respond with ONLY a JSON object and no markdown.
-If the text has no verifiable factual claim, respond exactly: {"hasClaim": false}
-If there IS a factual claim, search for it and respond with this exact JSON format:
-{"hasClaim": true, "claim": "extracted claim", "verdict": "true", "confidence": 85, "explanation": "brief explanation", "sources": [{"title": "Source", "url": "https://...", "domain": "example.com"}]}
-verdict must be one of: "true", "false", "partial", "unverifiable"
-confidence must be 0-100
-Include real URLs in sources. If source URLs are unavailable, return an empty sources array rather than inventing URLs.`,
-        },
-        {
-          role: 'user',
-          content: `Claim to verify: "${safeClaim}"`,
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -279,8 +383,7 @@ Include real URLs in sources. If source URLs are unavailable, return an empty so
     throw new Error(`TrueFoundry Gateway error (${response.status}): ${message}`);
   }
 
-  const gatewayResponse = await response.json();
-  const content = gatewayResponse.choices?.[0]?.message?.content;
+  const { raw: gatewayResponse, content } = await parseGatewayContent(response);
   if (!content) throw new Error('No response from TrueFoundry Gateway');
 
   return {
@@ -290,6 +393,14 @@ Include real URLs in sources. If source URLs are unavailable, return an empty so
       provider: gatewayResponse.provider,
       usage: gatewayResponse.usage,
       fromCache: hasGatewayCacheHit(gatewayResponse.usage),
+      mode: useAgent ? 'agent-mcp' : 'chat',
+      mcp: useAgent
+        ? {
+            agentAppId: config.agentAppId || undefined,
+            server: config.mcpServerFqn || config.mcpServerUrl || undefined,
+            tools: config.mcpToolNames,
+          }
+        : undefined,
     },
   };
 }
@@ -356,6 +467,11 @@ async function route(req, res) {
         process.env.TRUEFOUNDRY_API_KEY &&
         process.env.TRUEFOUNDRY_GATEWAY_BASE_URL &&
         process.env.TRUEFOUNDRY_MODEL_ID,
+      ),
+      trueFoundryAgentConfigured: Boolean(
+        process.env.TRUEFOUNDRY_AGENT_APP_ID ||
+        process.env.TRUEFOUNDRY_MCP_SERVER_FQN ||
+        process.env.TRUEFOUNDRY_MCP_SERVER_URL,
       ),
       mistralTtsConfigured: Boolean(process.env.MISTRAL_API_KEY),
       mistralTranscriptionConfigured: Boolean(process.env.MISTRAL_API_KEY),

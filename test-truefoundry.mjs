@@ -74,6 +74,8 @@ async function main() {
 
     const model = result.gateway?.model || 'unknown-model';
     const provider = result.gateway?.provider || 'unknown-provider';
+    const mode = result.gateway?.mode || 'unknown-mode';
+    const mcpServer = result.gateway?.mcp?.server || result.gateway?.mcp?.agentAppId || 'none';
     const sourceCount = Array.isArray(result.sources) ? result.sources.length : 0;
     const sourceLabel = sourceCount === 1 ? 'source' : 'sources';
     const cacheLabel = result.fromCache ? 'cache metadata present' : 'fresh/no cache metadata';
@@ -83,7 +85,8 @@ async function main() {
       sourceCount > 0 ? 'green' : 'yellow',
     );
     console.log(`  claim: ${result.claim}`);
-    console.log(`  gateway: ${provider} / ${model}`);
+    console.log(`  gateway: ${provider} / ${model} / ${mode}`);
+    console.log(`  mcp: ${mcpServer}`);
   }
 
   await postJson(`/api/sessions/${session.id}/end`, {});
