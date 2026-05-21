@@ -3,7 +3,7 @@ import { RotateCcw, CheckCircle, XCircle, AlertTriangle, HelpCircle } from 'luci
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getVerdictColor } from '@/components/VerdictBadge';
-import { supabase } from '@/integrations/supabase/client';
+import { clearResults, getStats } from '@/services/api';
 import { toast } from 'sonner';
 import type { FactCheckStats, Verdict } from '@/types/factCheck';
 
@@ -40,45 +40,9 @@ export default function Stats() {
 
   const fetchStats = useCallback(async () => {
     try {
-      // Fetch verdict counts
-      const { data: results, error: resultsError } = await supabase
-        .from('fact_check_results')
-        .select('verdict');
-
-      if (resultsError) throw resultsError;
-
-      // Fetch sessions
-      const { data: sessions, error: sessionsError } = await supabase
-        .from('fact_check_sessions')
-        .select('*')
-        .order('started_at', { ascending: false })
-        .limit(10);
-
-      if (sessionsError) throw sessionsError;
-
-      // Calculate stats
-      const verdictCounts = (results || []).reduce(
-        (acc, row) => {
-          const verdict = row.verdict as Verdict;
-          acc[verdict] = (acc[verdict] || 0) + 1;
-          return acc;
-        },
-        {} as Record<Verdict, number>
-      );
-
-      setStats({
-        totalChecked: results?.length || 0,
-        trueCount: verdictCounts['true'] || 0,
-        falseCount: verdictCounts['false'] || 0,
-        partialCount: verdictCounts['partial'] || 0,
-        unverifiableCount: verdictCounts['unverifiable'] || 0,
-        sessions: (sessions || []).map((s) => ({
-          id: s.id,
-          startedAt: new Date(s.started_at),
-          endedAt: s.ended_at ? new Date(s.ended_at) : null,
-          claimsChecked: s.claims_checked || 0,
-        })),
-      });
+      const response = await getStats();
+      if (!response.success || !response.data) throw new Error(response.error);
+      setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);
       toast.error('Failed to load statistics');
@@ -97,19 +61,8 @@ export default function Stats() {
     }
 
     try {
-      // Delete all results (sessions will cascade)
-      const { error } = await supabase
-        .from('fact_check_results')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
-
-      if (error) throw error;
-
-      // Also delete sessions
-      await supabase
-        .from('fact_check_sessions')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
+      const response = await clearResults();
+      if (!response.success) throw new Error(response.error);
 
       setStats({
         totalChecked: 0,

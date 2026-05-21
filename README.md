@@ -4,10 +4,11 @@ Real-time audio fact-checking application that listens to speech, identifies cla
 
 ## Features
 
-- Live audio transcription using ElevenLabs speech-to-text
+- Live audio transcription using Mistral Voxtral speech-to-text
 - Automatic claim detection and extraction
-- Real-time fact verification with Google Search grounding
-- Semantic caching with Hyperspell for instant repeated claim verification
+- Real-time fact verification through TrueFoundry AI Gateway
+- Read-aloud fact-check summaries using Mistral Voxtral TTS
+- Gateway-level governance for model routing, caching, rate limits, budgets, and observability
 - History tracking of checked claims
 - Statistics dashboard
 
@@ -17,10 +18,12 @@ Real-time audio fact-checking application that listens to speech, identifies cla
 - Vite
 - Tailwind CSS
 - shadcn/ui
-- Supabase (Database & Edge Functions)
-- ElevenLabs API (Speech-to-Text)
-- Google Gemini 2.0 (AI + Search Grounding)
-- Hyperspell (Semantic Cache - Optional)
+- Node HTTP API
+- SQLite
+- Mistral Voxtral STT
+- TrueFoundry AI Gateway
+- Gateway-backed LLM provider with source-aware fact checking
+- Mistral Voxtral TTS
 
 ## Getting Started
 
@@ -32,33 +35,53 @@ npm install
 
 ### 2. Configure Environment Variables
 
-Set up the following secrets in Supabase Dashboard (Project Settings > Edge Functions > Secrets):
+Create a local `.env` file:
 
-- `GEMINI_API_KEY` - Get from [Google AI Studio](https://ai.google.dev)
-- `ELEVENLABS_API_KEY` - Get from [ElevenLabs](https://elevenlabs.io)
-- `HYPERSPELL_API_KEY` - (Optional) Get from [Hyperspell](https://app.hyperspell.com) for semantic caching
+```bash
+MISTRAL_API_KEY=your_mistral_api_key
+MISTRAL_TRANSCRIPTION_MODEL=voxtral-mini-latest
+MISTRAL_TRANSCRIPTION_LANGUAGE=en
+MISTRAL_TTS_MODEL=voxtral-mini-tts-2603
+MISTRAL_TTS_RESPONSE_FORMAT=mp3
+MISTRAL_TTS_REF_AUDIO_PATH=data/mistral-reference.aiff
+TRUEFOUNDRY_API_KEY=your_truefoundry_api_key
+TRUEFOUNDRY_GATEWAY_BASE_URL=https://gateway.truefoundry.ai
+TRUEFOUNDRY_MODEL_ID=google-gemini/gemini-3.5-flash
+VITE_API_URL=http://localhost:8787
+```
 
-### 3. What is Hyperspell?
+Pick `TRUEFOUNDRY_MODEL_ID` from the TrueFoundry Playground. For best fact-check quality, use a model or provider setup that returns real source URLs. SQLite data is stored in `data/factcheckme.sqlite` by default.
 
-Hyperspell provides semantic caching for fact-checks. When enabled:
+### 3. What is TrueFoundry doing here?
 
-- **Instant responses** for repeated claims (< 100ms vs 2-3 seconds)
-- **Cost savings** by avoiding redundant API calls to Gemini
-- **Semantic matching** recognizes similar claims worded differently
-  - "Unemployment is 4.2%" and "The unemployment rate is at 4.2%" match
-- **Perfect for debates** where politicians repeat the same talking points
+The Node API sends fact-check prompts to TrueFoundry's OpenAI-compatible Chat Completions endpoint. TrueFoundry sits between FactCheckMe and the model provider so LLM traffic can be governed centrally:
 
-Without Hyperspell, every claim gets verified fresh. With Hyperspell, the second mention of "inflation is 9%" returns instantly from cache.
+- **Observability** for model requests and token usage
+- **Rate limits and budgets** to control spend
+- **Gateway caching** where supported by the configured provider/model
+- **Model routing and fallbacks** without changing the frontend
+- **Guardrails** and access control configured in TrueFoundry
+
+Microphone audio is recorded in short browser chunks and sent to the local API, which calls Mistral's `audio/transcriptions` endpoint with `MISTRAL_API_KEY`. Expanded fact-check cards can also read results aloud through Mistral's `audio/speech` endpoint. The Mistral key is never exposed to frontend code. Mistral TTS requires either `MISTRAL_TTS_VOICE_ID` or a reference audio file at `MISTRAL_TTS_REF_AUDIO_PATH`.
 
 ### 4. Start Development Server
 
 ```bash
+npm run dev:api
 npm run dev
+```
+
+Or run both from one shell:
+
+```bash
+npm run dev:full
 ```
 
 ## Scripts
 
 - `npm run dev` - Start development server
+- `npm run dev:api` - Start the Node API and SQLite backend
+- `npm run dev:full` - Start the API and Vite together
 - `npm run build` - Build for production
 - `npm run test` - Run tests
 - `npm run lint` - Run linter

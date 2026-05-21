@@ -17,7 +17,7 @@ export interface FactCheckResult {
   timestamp: Date;
   sources: FactCheckSource[];
   explanation?: string;
-  fromCache?: boolean; // True if result came from Hyperspell semantic cache
+  fromCache?: boolean; // True if gateway cache metadata was present
 }
 
 // Monitoring session status

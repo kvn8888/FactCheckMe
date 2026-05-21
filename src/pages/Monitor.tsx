@@ -3,7 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ListenButton } from '@/components/ListenButton';
 import { StatusBar } from '@/components/StatusBar';
 import { FactCard } from '@/components/FactCard';
-import { useElevenLabsSTT } from '@/hooks/useElevenLabsSTT';
+import { useMistralSTT } from '@/hooks/useMistralSTT';
 import { useFactChecker } from '@/hooks/useFactChecker';
 import { toast } from 'sonner';
 import type { FactCheckResult } from '@/types/factCheck';
@@ -38,7 +38,7 @@ export default function Monitor() {
     startListening,
     stopListening,
     partialTranscript,
-  } = useElevenLabsSTT({
+  } = useMistralSTT({
     onTranscript: processText,
     onError: handleError,
   });

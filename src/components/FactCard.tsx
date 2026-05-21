@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { ChevronDown, ExternalLink, Clock } from 'lucide-react';
+import { ChevronDown, ExternalLink, Clock, Loader2, Volume2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { VerdictBadge } from '@/components/VerdictBadge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { synthesizeSpeech } from '@/services/api';
 import type { FactCheckResult } from '@/types/factCheck';
 
 interface FactCardProps {
@@ -14,6 +16,8 @@ interface FactCardProps {
 
 export function FactCard({ result, className, isNew = false }: FactCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
 
   const formatTime = (date: Date) => {
     return new Date(date).toLocaleTimeString('en-US', {
@@ -21,6 +25,47 @@ export function FactCard({ result, className, isNew = false }: FactCardProps) {
       minute: '2-digit',
       hour12: true,
     });
+  };
+
+  const getSpeechText = () => {
+    const sourceSummary = result.sources.length > 0
+      ? `Sources include ${result.sources.slice(0, 2).map((source) => source.domain || source.title).join(' and ')}.`
+      : 'No source URLs were returned.';
+
+    return [
+      `Claim: ${result.claim}.`,
+      `Verdict: ${result.verdict}.`,
+      `Confidence: ${result.confidence} percent.`,
+      result.explanation ? `Explanation: ${result.explanation}` : '',
+      sourceSummary,
+    ].filter(Boolean).join(' ');
+  };
+
+  const playSpeech = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setIsSpeaking(true);
+    setSpeechError(null);
+
+    try {
+      const response = await synthesizeSpeech(getSpeechText());
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to generate speech');
+      }
+
+      const binary = atob(response.data.audioData);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const blob = new Blob([bytes], { type: response.data.mimeType });
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+
+      audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), { once: true });
+      audio.addEventListener('error', () => URL.revokeObjectURL(audioUrl), { once: true });
+      await audio.play();
+    } catch (error) {
+      setSpeechError(error instanceof Error ? error.message : 'Failed to play speech');
+    } finally {
+      setIsSpeaking(false);
+    }
   };
 
   return (
@@ -81,6 +126,27 @@ export function FactCard({ result, className, isNew = false }: FactCardProps) {
                 </p>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={playSpeech}
+                disabled={isSpeaking}
+                className="w-full justify-center"
+              >
+                {isSpeaking ? (
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={3} />
+                ) : (
+                  <Volume2 className="h-4 w-4" strokeWidth={3} />
+                )}
+                {isSpeaking ? 'Generating audio' : 'Read aloud'}
+              </Button>
+              {speechError && (
+                <p className="text-xs font-bold text-destructive">{speechError}</p>
+              )}
+            </div>
 
             {/* Sources */}
             {result.sources.length > 0 && (

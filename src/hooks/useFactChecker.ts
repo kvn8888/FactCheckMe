@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { createSession, endSession, factCheckClaim } from '@/services/api';
 import type { FactCheckResult, MonitoringStatus } from '@/types/factCheck';
 
 interface UseFactCheckerOptions {
@@ -28,34 +28,29 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   const lastApiCallRef = useRef<number>(0);
   const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const createSession = useCallback(async () => {
+  const startSession = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('fact_check_sessions')
-        .insert({})
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Failed to create session:', error);
+      const response = await createSession();
+      if (!response.success || !response.data) {
+        console.error('Failed to create session:', response.error);
         return null;
       }
 
-      return data.id;
+      return response.data.id;
     } catch (e) {
       console.error('Session creation error:', e);
       return null;
     }
   }, []);
 
-  const endSession = useCallback(async () => {
+  const finishSession = useCallback(async () => {
     if (!sessionIdRef.current) return;
 
     try {
-      await supabase
-        .from('fact_check_sessions')
-        .update({ ended_at: new Date().toISOString() })
-        .eq('id', sessionIdRef.current);
+      const response = await endSession(sessionIdRef.current);
+      if (!response.success) {
+        console.error('Failed to end session:', response.error);
+      }
     } catch (e) {
       console.error('Failed to end session:', e);
     }
@@ -73,36 +68,21 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       const claim = processingQueueRef.current.shift()!;
 
       try {
-        const { data, error } = await supabase.functions.invoke('fact-check', {
-          body: { claim, sessionId: sessionIdRef.current },
-        });
+        const response = await factCheckClaim(claim, sessionIdRef.current);
 
-        if (error) {
-          console.error('Fact-check error:', error);
-          onError?.(error.message || 'Failed to fact-check claim');
-          continue;
-        }
-
-        if (data.error) {
-          onError?.(data.error);
+        if (!response.success || !response.data) {
+          console.error('Fact-check error:', response.error);
+          onError?.(response.error || 'Failed to fact-check claim');
           continue;
         }
 
         // Skip if no claim was found in the speech
-        if (data.noClaim) {
+        if ('noClaim' in response.data) {
           console.log('No factual claim detected in speech');
           continue;
         }
 
-        const result: FactCheckResult = {
-          id: data.id,
-          claim: data.claim,
-          verdict: data.verdict,
-          confidence: data.confidence,
-          timestamp: new Date(data.timestamp),
-          sources: data.sources || [],
-          explanation: data.explanation,
-        };
+        const result: FactCheckResult = response.data;
 
         setResults((prev) => [result, ...prev]);
         setStatus((prev) => ({
@@ -174,7 +154,7 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   }, [processBufferedText]);
 
   const startMonitoring = useCallback(async () => {
-    const sessionId = await createSession();
+    const sessionId = await startSession();
     sessionIdRef.current = sessionId;
 
     setStatus({
@@ -185,7 +165,7 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       factsChecked: 0,
     });
     setResults([]);
-  }, [createSession]);
+  }, [startSession]);
 
   const stopMonitoring = useCallback(async () => {
     // Process any remaining buffered text immediately
@@ -212,10 +192,10 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       while (isProcessingRef.current || processingQueueRef.current.length > 0) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      await endSession();
+      await finishSession();
       sessionIdRef.current = null;
     }, 0);
-  }, [endSession, processBufferedText]);
+  }, [finishSession, processBufferedText]);
 
   const clearResults = useCallback(() => {
     setResults([]);

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FactCard } from '@/components/FactCard';
 import { VerdictBadge } from '@/components/VerdictBadge';
-import { supabase } from '@/integrations/supabase/client';
+import { getFacts } from '@/services/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { FactCheckResult, Verdict } from '@/types/factCheck';
@@ -21,25 +21,9 @@ export default function History() {
 
   const fetchResults = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('fact_check_results')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-
-      const formattedResults: FactCheckResult[] = (data || []).map((row) => ({
-        id: row.id,
-        claim: row.claim,
-        verdict: row.verdict as Verdict,
-        confidence: row.confidence || 75,
-        timestamp: new Date(row.created_at),
-        sources: (row.sources as Array<{ title: string; url: string; domain: string }>) || [],
-        explanation: row.explanation || undefined,
-      }));
-
-      setResults(formattedResults);
+      const response = await getFacts(100);
+      if (!response.success || !response.data) throw new Error(response.error);
+      setResults(response.data);
     } catch (error) {
       console.error('Error fetching results:', error);
       toast.error('Failed to load history');
@@ -50,35 +34,6 @@ export default function History() {
 
   useEffect(() => {
     fetchResults();
-
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel('fact_check_results')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'fact_check_results',
-        },
-        (payload) => {
-          const newResult: FactCheckResult = {
-            id: payload.new.id,
-            claim: payload.new.claim,
-            verdict: payload.new.verdict as Verdict,
-            confidence: payload.new.confidence || 75,
-            timestamp: new Date(payload.new.created_at),
-            sources: (payload.new.sources as Array<{ title: string; url: string; domain: string }>) || [],
-            explanation: payload.new.explanation || undefined,
-          };
-          setResults((prev) => [newResult, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [fetchResults]);
 
   const handleRefresh = async () => {
