@@ -109,6 +109,8 @@ const getTrueFoundryConfig = () => {
     agentAppId: process.env.TRUEFOUNDRY_AGENT_APP_ID || null,
     mcpServerFqn: process.env.TRUEFOUNDRY_MCP_SERVER_FQN || null,
     mcpServerUrl: process.env.TRUEFOUNDRY_MCP_SERVER_URL || null,
+    mcpAuthToken: process.env.TRUEFOUNDRY_MCP_AUTH_TOKEN || apiKey,
+    tavilyApiKey: process.env.TAVILY_API_KEY || null,
     mcpToolNames: (process.env.TRUEFOUNDRY_MCP_TOOL_NAMES || '')
       .split(',')
       .map((tool) => tool.trim())
@@ -144,7 +146,7 @@ const hasGatewayCacheHit = (usage = {}) => {
 };
 
 const shouldUseTrueFoundryAgent = ({ agentAppId, mcpServerFqn, mcpServerUrl }) =>
-  Boolean(agentAppId || mcpServerFqn || mcpServerUrl);
+  Boolean(process.env.TRUEFOUNDRY_AGENT_USE_TOOL_CALLS === 'true' && (agentAppId || mcpServerFqn || mcpServerUrl));
 
 const buildFactCheckMessages = (safeClaim) => [
   {
@@ -160,6 +162,26 @@ Include real URLs from Tavily-backed search results in sources. If source URLs a
   {
     role: 'user',
     content: `Claim to verify: "${safeClaim}"`,
+  },
+];
+
+const buildSourcedFactCheckMessages = (safeClaim, sources) => [
+  {
+    role: 'system',
+    content: `You are a real-time fact-checker. Use only the provided Tavily MCP search context for sourced claims. Respond with ONLY a JSON object and no markdown.
+If the text has no verifiable factual claim, respond exactly: {"hasClaim": false}
+If there IS a factual claim, respond with this exact JSON format:
+{"hasClaim": true, "claim": "extracted claim", "verdict": "true", "confidence": 85, "explanation": "brief explanation", "sources": [{"title": "Source", "url": "https://...", "domain": "example.com"}]}
+verdict must be one of: "true", "false", "partial", "unverifiable"
+confidence must be 0-100
+Only include source URLs present in the Tavily MCP context. If the context is insufficient, use verdict "unverifiable".`,
+  },
+  {
+    role: 'user',
+    content: `Claim to verify: "${safeClaim}"
+
+Tavily MCP search context:
+${JSON.stringify(sources, null, 2)}`,
   },
 ];
 
@@ -199,11 +221,14 @@ const parseGatewayContent = async (response) => {
   };
 };
 
-const buildMcpServers = ({ mcpServerFqn, mcpServerUrl, mcpToolNames }) => {
+const buildMcpServers = ({ mcpServerFqn, mcpServerUrl, mcpAuthToken, mcpToolNames }) => {
   if (!mcpServerFqn && !mcpServerUrl) return [];
 
   const server = {
     enable_all_tools: mcpToolNames.length === 0,
+    headers: {
+      Authorization: `Bearer ${mcpAuthToken}`,
+    },
   };
 
   if (mcpServerFqn) server.integration_fqn = mcpServerFqn;
@@ -214,6 +239,111 @@ const buildMcpServers = ({ mcpServerFqn, mcpServerUrl, mcpToolNames }) => {
 
   return [server];
 };
+
+const parseEventStreamJson = (body) => {
+  let parsed = null;
+
+  for (const line of body.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    parsed = JSON.parse(data);
+  }
+
+  return parsed;
+};
+
+const postMcpJsonRpc = async ({ url, headers, payload }) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const body = await response.text();
+  const parsed = response.headers.get('content-type')?.includes('text/event-stream')
+    ? parseEventStreamJson(body)
+    : body
+      ? JSON.parse(body)
+      : null;
+
+  if (!response.ok || parsed?.error) {
+    const message = parsed?.error?.message || body || `MCP request failed with ${response.status}`;
+    throw new Error(`TrueFoundry MCP error (${response.status}): ${message}`);
+  }
+
+  return { response, parsed };
+};
+
+async function callTavilySearchViaMcp(claim, config) {
+  if (!config.mcpServerUrl) return [];
+
+  const headers = {
+    Authorization: `Bearer ${config.mcpAuthToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+  };
+
+  if (config.tavilyApiKey) {
+    headers['x-tfy-mcp-headers'] = JSON.stringify({
+      Authorization: `Bearer ${config.tavilyApiKey}`,
+    });
+  }
+
+  const { response: initResponse } = await postMcpJsonRpc({
+    url: config.mcpServerUrl,
+    headers,
+    payload: {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'FactCheckMe', version: '1.0.0' },
+      },
+    },
+  });
+
+  const sessionId = initResponse.headers.get('mcp-session-id');
+  if (!sessionId) throw new Error('TrueFoundry MCP did not return a session id');
+
+  const sessionHeaders = { ...headers, 'mcp-session-id': sessionId };
+  await fetch(config.mcpServerUrl, {
+    method: 'POST',
+    headers: sessionHeaders,
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+  });
+
+  const { parsed } = await postMcpJsonRpc({
+    url: config.mcpServerUrl,
+    headers: sessionHeaders,
+    payload: {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'tavily_search',
+        arguments: {
+          query: `${claim} fact check`,
+          max_results: 5,
+          search_depth: 'advanced',
+        },
+      },
+    },
+  });
+
+  const text = parsed?.result?.content?.find((item) => item.type === 'text')?.text || '{}';
+  const result = JSON.parse(text);
+  if (result.error) throw new Error(`Tavily MCP search failed: ${result.detail || result.error}`);
+
+  return (result.results || []).map((source) => ({
+    title: source.title || source.url || 'Source',
+    url: source.url,
+    domain: source.url ? new URL(source.url).hostname.replace(/^www\./, '') : '',
+    content: source.content || source.snippet || '',
+    score: source.score,
+  })).filter((source) => source.url);
+}
 
 const getMistralConfig = () => {
   const apiKey = process.env.MISTRAL_API_KEY;
@@ -332,7 +462,10 @@ async function makeGatewayFactCheck(claim) {
   const config = getTrueFoundryConfig();
   const { apiKey, gatewayBaseUrl, model } = config;
   const safeClaim = sanitizeClaimForPrompt(claim);
-  const messages = buildFactCheckMessages(safeClaim);
+  const mcpSearchSources = await callTavilySearchViaMcp(safeClaim, config);
+  const messages = mcpSearchSources.length > 0
+    ? buildSourcedFactCheckMessages(safeClaim, mcpSearchSources)
+    : buildFactCheckMessages(safeClaim);
   const useAgent = shouldUseTrueFoundryAgent(config);
   const endpoint = config.agentAppId
     ? `${gatewayBaseUrl}/agent/${config.agentAppId}/responses`
@@ -393,8 +526,14 @@ async function makeGatewayFactCheck(claim) {
       provider: gatewayResponse.provider,
       usage: gatewayResponse.usage,
       fromCache: hasGatewayCacheHit(gatewayResponse.usage),
-      mode: useAgent ? 'agent-mcp' : 'chat',
-      mcp: useAgent
+      mode: mcpSearchSources.length > 0 ? 'mcp-search-chat' : useAgent ? 'agent-mcp' : 'chat',
+      mcp: mcpSearchSources.length > 0
+        ? {
+            server: config.mcpServerUrl,
+            tools: ['tavily_search'],
+            sourceCount: mcpSearchSources.length,
+          }
+        : useAgent
         ? {
             agentAppId: config.agentAppId || undefined,
             server: config.mcpServerFqn || config.mcpServerUrl || undefined,

@@ -66,11 +66,18 @@ TRUEFOUNDRY_MCP_SERVER_URL=https://gateway.truefoundry.ai/mcp/your-server
 
 # Optional: restrict tools. Omit this to enable all tools exposed by that MCP server.
 TRUEFOUNDRY_MCP_TOOL_NAMES=tavily_search,tavily_extract
+
+# Optional: defaults to TRUEFOUNDRY_API_KEY when unset.
+TRUEFOUNDRY_MCP_AUTH_TOKEN=your_mcp_gateway_token
+
+# Optional: forwarded via TrueFoundry's x-tfy-mcp-headers auth override
+# when the Tavily MCP server needs per-request header credentials.
+TAVILY_API_KEY=your_tavily_api_key
 ```
 
 ### 3. What is TrueFoundry doing here?
 
-The Node API sends fact-check prompts through TrueFoundry. By default it uses the OpenAI-compatible Chat Completions endpoint. If `TRUEFOUNDRY_AGENT_APP_ID`, `TRUEFOUNDRY_MCP_SERVER_FQN`, or `TRUEFOUNDRY_MCP_SERVER_URL` is set, it switches to TrueFoundry Agent mode and instructs the model to use Tavily MCP search before producing the verdict. TrueFoundry sits between FactCheckMe, the model provider, and MCP tools so LLM/tool traffic can be governed centrally:
+The Node API sends fact-check prompts through TrueFoundry. If `TRUEFOUNDRY_MCP_SERVER_URL` is set, it first calls `tavily_search` through TrueFoundry's MCP Gateway, then sends those source snippets through TrueFoundry Chat Completions for the verdict. If `TRUEFOUNDRY_AGENT_USE_TOOL_CALLS=true` is set, the app can instead use TrueFoundry Agent tool-calling mode. TrueFoundry sits between FactCheckMe, the model provider, and MCP tools so LLM/tool traffic can be governed centrally:
 
 - **Observability** for model requests and token usage
 - **Rate limits and budgets** to control spend
