@@ -1,49 +1,59 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { transcribeAudio } from '@/services/api';
+import { consumeCompleteSentences } from '@/lib/sentences';
+import { getRealtimeTranscriptionUrl } from '@/services/api';
 
 interface UseMistralSTTOptions {
   onTranscript: (text: string) => void;
   onError?: (error: string) => void;
 }
 
-const RECORDING_INTERVAL_MS = 4500;
-const MIN_AUDIO_BYTES = 1200;
-const MIN_TRANSCRIPT_CHARS = 8;
+const TARGET_SAMPLE_RATE = 16000;
+const PROCESSOR_BUFFER_SIZE = 4096;
 
-const getSupportedMimeType = () => {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ];
+const floatTo16BitPcm = (input: Float32Array, inputSampleRate: number) => {
+  const ratio = inputSampleRate / TARGET_SAMPLE_RATE;
+  const outputLength = Math.max(1, Math.floor(input.length / ratio));
+  const output = new Int16Array(outputLength);
 
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
+  for (let outputIndex = 0; outputIndex < outputLength; outputIndex++) {
+    const start = Math.floor(outputIndex * ratio);
+    const end = Math.min(input.length, Math.floor((outputIndex + 1) * ratio));
+    let sample = 0;
+
+    for (let inputIndex = start; inputIndex < end; inputIndex++) {
+      sample += input[inputIndex];
+    }
+
+    sample = Math.max(-1, Math.min(1, sample / Math.max(1, end - start)));
+    output[outputIndex] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+
+  return output;
 };
 
-const blobToBase64 = (blob: Blob) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || '');
-      resolve(result.includes(',') ? result.split(',')[1] : result);
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read audio chunk'));
-    reader.readAsDataURL(blob);
-  });
+const pcmToBase64 = (pcm: Int16Array) => {
+  const bytes = new Uint8Array(pcm.buffer);
+  let binary = '';
+
+  for (let index = 0; index < bytes.length; index++) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+
+  return btoa(binary);
+};
 
 export function useMistralSTT({ onTranscript, onError }: UseMistralSTTOptions) {
   const [isListening, setIsListening] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [partialTranscript, setPartialTranscript] = useState('');
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const [committedTranscripts, setCommittedTranscripts] = useState<string[]>([]);
+  const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const intervalRef = useRef<number | null>(null);
-  const processedTranscriptsRef = useRef<Set<string>>(new Set());
-  const lastTranscriptRef = useRef('');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const transcriptBufferRef = useRef('');
   const isStoppingRef = useRef(false);
-  const isProcessingAudioRef = useRef(false);
 
   const onTranscriptRef = useRef(onTranscript);
   const onErrorRef = useRef(onError);
@@ -56,80 +66,32 @@ export function useMistralSTT({ onTranscript, onError }: UseMistralSTTOptions) {
     onErrorRef.current = onError;
   }, [onError]);
 
-  const getNewTranscriptText = (text: string) => {
-    const previous = lastTranscriptRef.current;
-    lastTranscriptRef.current = text;
-
-    if (previous && text.toLowerCase().startsWith(previous.toLowerCase())) {
-      return text.slice(previous.length).trim();
-    }
-
-    return text;
-  };
-
-  const processAudioSnapshot = useCallback(async (blob: Blob) => {
-    if (blob.size < MIN_AUDIO_BYTES) return;
-    if (isProcessingAudioRef.current) return;
-
-    isProcessingAudioRef.current = true;
-
-    try {
-      const audioData = await blobToBase64(blob);
-      const response = await transcribeAudio(audioData, blob.type || 'audio/webm');
-
-      if (!response.success || !response.data) {
-        throw new Error(response.error || 'Failed to transcribe audio');
-      }
-
-      const fullText = response.data.text.trim();
-      const text = getNewTranscriptText(fullText);
-      if (text.length < MIN_TRANSCRIPT_CHARS || processedTranscriptsRef.current.has(text)) return;
-
-      processedTranscriptsRef.current.add(text);
-      setPartialTranscript(text);
-      onTranscriptRef.current(text);
-    } catch (error) {
-      if (!isStoppingRef.current) {
-        const message = error instanceof Error ? error.message : 'Failed to transcribe audio';
-        onErrorRef.current?.(message);
-      }
-    } finally {
-      isProcessingAudioRef.current = false;
-    }
+  const cleanupAudio = useCallback(() => {
+    processorNodeRef.current?.disconnect();
+    sourceNodeRef.current?.disconnect();
+    void audioContextRef.current?.close();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    processorNodeRef.current = null;
+    sourceNodeRef.current = null;
+    audioContextRef.current = null;
+    streamRef.current = null;
   }, []);
-
-  const processRecordedAudio = useCallback(() => {
-    const recorder = recorderRef.current;
-    if (!recorder || chunksRef.current.length === 0) return;
-
-    const type = recorder.mimeType || chunksRef.current[0]?.type || 'audio/webm';
-    const blob = new Blob(chunksRef.current, { type });
-    void processAudioSnapshot(blob);
-  }, [processAudioSnapshot]);
 
   const stopListening = useCallback(() => {
     isStoppingRef.current = true;
+    cleanupAudio();
 
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'end' }));
+      window.setTimeout(() => socket.close(), 5000);
+    } else {
+      socket?.close();
     }
 
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.requestData();
-      recorder.stop();
-    }
-
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    recorderRef.current = null;
-    chunksRef.current = [];
-    lastTranscriptRef.current = '';
-    isProcessingAudioRef.current = false;
+    socketRef.current = null;
     setIsListening(false);
-    setPartialTranscript('');
-  }, []);
+  }, [cleanupAudio]);
 
   const startListening = useCallback(async () => {
     setIsConnecting(true);
@@ -147,54 +109,93 @@ export function useMistralSTT({ onTranscript, onError }: UseMistralSTTOptions) {
           autoGainControl: true,
         },
       });
-      const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const AudioContextClass = window.AudioContext;
+      const audioContext = new AudioContextClass({ sampleRate: TARGET_SAMPLE_RATE });
+      const sourceNode = audioContext.createMediaStreamSource(stream);
+      const processorNode = audioContext.createScriptProcessor(PROCESSOR_BUFFER_SIZE, 1, 1);
+      const socket = new WebSocket(getRealtimeTranscriptionUrl());
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-          processRecordedAudio();
+      transcriptBufferRef.current = '';
+      setPartialTranscript('');
+      setCommittedTranscripts([]);
+
+      processorNode.onaudioprocess = (event) => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+
+        const input = event.inputBuffer.getChannelData(0);
+        const pcm = floatTo16BitPcm(input, audioContext.sampleRate);
+        socket.send(JSON.stringify({ type: 'audio', audio: pcmToBase64(pcm) }));
+      };
+
+      socket.onmessage = (event) => {
+        const message = JSON.parse(String(event.data));
+
+        if (message.type === 'ready') {
+          setIsConnecting(false);
+          setIsListening(true);
+          return;
+        }
+
+        if (message.type === 'transcript_delta' && typeof message.text === 'string') {
+          transcriptBufferRef.current += message.text;
+          const { sentences, remainder } = consumeCompleteSentences(transcriptBufferRef.current);
+          transcriptBufferRef.current = remainder;
+          setPartialTranscript(remainder);
+
+          if (sentences.length > 0) {
+            setCommittedTranscripts((current) => [...current, ...sentences]);
+            sentences.forEach((sentence) => onTranscriptRef.current(sentence));
+          }
+          return;
+        }
+
+        if (message.type === 'error') {
+          onErrorRef.current?.(message.error || 'Mistral realtime transcription failed');
         }
       };
-      recorder.onerror = () => {
-        onErrorRef.current?.('Microphone recording failed');
+
+      socket.onerror = () => {
+        if (!isStoppingRef.current) {
+          onErrorRef.current?.('Mistral realtime transcription connection failed');
+        }
+      };
+
+      socket.onclose = () => {
+        if (!isStoppingRef.current) {
+          cleanupAudio();
+          setIsListening(false);
+          setIsConnecting(false);
+        }
       };
 
       streamRef.current = stream;
-      recorderRef.current = recorder;
-      chunksRef.current = [];
-      processedTranscriptsRef.current.clear();
-      lastTranscriptRef.current = '';
-      setPartialTranscript('');
-      recorder.start();
-      intervalRef.current = window.setInterval(() => {
-        const currentRecorder = recorderRef.current;
-        if (currentRecorder?.state === 'recording') currentRecorder.requestData();
-      }, RECORDING_INTERVAL_MS);
-      setIsListening(true);
+      audioContextRef.current = audioContext;
+      sourceNodeRef.current = sourceNode;
+      processorNodeRef.current = processorNode;
+      socketRef.current = socket;
+      sourceNode.connect(processorNode);
+      processorNode.connect(audioContext.destination);
       return true;
     } catch (error) {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-      recorderRef.current = null;
-      chunksRef.current = [];
-      const message = error instanceof Error ? error.message : 'Failed to start speech recognition';
+      cleanupAudio();
+      socketRef.current?.close();
+      socketRef.current = null;
+      const message = error instanceof Error ? error.message : 'Failed to start realtime transcription';
       onErrorRef.current?.(message);
-      return false;
-    } finally {
       setIsConnecting(false);
+      return false;
     }
-  }, [processRecordedAudio]);
+  }, [cleanupAudio]);
 
   useEffect(() => stopListening, [stopListening]);
 
   return {
     isListening,
     isConnecting,
-    isSupported: typeof MediaRecorder !== 'undefined',
+    isSupported: Boolean(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.WebSocket),
     startListening,
     stopListening,
     partialTranscript,
-    committedTranscripts: [],
+    committedTranscripts,
   };
 }

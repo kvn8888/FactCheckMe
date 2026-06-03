@@ -25,7 +25,7 @@ const verdictConfig = {
     iconClass: 'text-verdict-false-foreground',
   },
   partial: {
-    label: 'PARTIAL',
+    label: 'MISLEADING',
     Icon: AlertTriangle,
     bgClass: 'bg-verdict-partial',
     textClass: 'text-verdict-partial-foreground',

@@ -1,184 +1,194 @@
-# FactCheckMe Demo Script - Quick Reference
+# FactCheckMe Demo Script
 
-## 30-Second Elevator Pitch
+## One-Liner
 
-> "FactCheckMe uses AI through TrueFoundry's gateway to verify claims as they're spoken. Every model request is governed, observable, and routed centrally, which is exactly what you want for debate-scale fact-checking."
+> "FactCheckMe listens to live speech, transcribes it with Mistral, and checks factual claims with Gemini's native Google Search grounding."
 
----
+## 3-Minute Live Demo
 
-## 2-Minute Live Demo
+### 0. Setup
 
-### Setup (5 seconds)
-- Open app → Monitor page
-- Click "Start Monitoring"
+Open two terminals:
 
-### Part 1: Basic Fact-Check (30 seconds)
-
-**Say:** "The unemployment rate is 4.2 percent"
-
-**Wait 2-3 seconds...**
-
-**Point out:**
-- ✅ Verdict appears (TRUE/FALSE/PARTIAL)
-- 📊 Confidence score shown
-- 🔗 Real source URLs from the configured source-aware model
-- ⏱️ Took 2-3 seconds (first time)
-
----
-
-### Part 2: The Gateway - Repeat Demo (30 seconds)
-
-**Say (same claim, different words):** "Unemployment is at 4.2%"
-
-**Compare the repeat request latency and source consistency.**
-
-**Explain:**
-> "This request goes through TrueFoundry too, so we can observe repeated claims, token usage, routing, and any gateway cache metadata from one place."
-
-**Try one more:**
-
-**Say:** "Currently, the unemployment rate stands at 4.2 percent"
-
-**Compare the gateway behavior again.**
-
----
-
-### Part 3: Controversy (30 seconds)
-
-**Say:** "Jeffrey Epstein was an Israeli agent"
-
-**Wait for verdict...**
-
-**Point out:**
-- Verdict: FALSE/UNVERIFIABLE
-- Sources debunking the claim
-- Shows real source URLs when the configured model/provider supports source-aware answers
-
-**Explain:**
-> "For controversial claims like this, the configured gateway model returns a verdict, confidence, and source URLs so you can verify yourself."
-
----
-
-### Part 4: Show Stats (10 seconds)
-
-**Point to dashboard:**
-- "X claims checked"
-- "Y true, Z false"
-- "Session duration"
-
----
-
-## Key Talking Points
-
-### Problem
-"Politicians repeat the same claims in debates. Fact-checkers can't keep up manually, and existing tools are slow and don't remember what they've already verified."
-
-### Solution
-"FactCheckMe combines:
-1. **TrueFoundry AI Gateway** - Centralized model governance and observability
-2. **Source-aware fact-checking** - Returns verdicts with source URLs when the configured model supports it
-3. **Live transcription** - Works with spoken audio in real-time"
-
-### The Hook
-"In a 90-minute debate, you'll hear the same 10-15 claims repeated. With TrueFoundry in the middle, every model request is observable, governed, and can be routed or cached without changing the app."
-
----
-
-## Demo Claims Cheat Sheet
-
-### Quick True Claims ✅
-- "The Earth orbits the Sun"
-- "There are 50 states in the US"
-- "Joe Biden is the 46th president"
-
-### Quick False Claims ❌
-- "The Moon is made of cheese"
-- "There are 52 states in the US"
-- "Unemployment is at a 50-year high"
-
-### Gateway Repeat Claims ⚡
-**First:** "The unemployment rate is 4.2 percent"
-**Second:** "Unemployment is at 4.2%"
-**Third:** "We have 4.2% unemployment"
-
-### Controversial (Attention-Grabbing) 🔥
-- "Jeffrey Epstein was an Israeli agent"
-- "The 2020 election was stolen"
-- "COVID came from a lab leak"
-
----
-
-## Common Questions & Answers
-
-**Q: "What if it's wrong?"**
-A: "We show sources so you can verify. The system is as good as Google Search results - if credible sources exist, we find them."
-
-**Q: "How fast is it?"**
-A: "Latency depends on the configured gateway model, but TrueFoundry gives us one place to observe latency, token usage, rate limits, budgets, and cache metadata."
-
-**Q: "What about bias?"**
-A: "We configure a source-aware model through TrueFoundry and show source URLs when they are returned. You can click through to verify yourself."
-
-**Q: "Does it work in real debates?"**
-A: "Yes! It transcribes audio live, detects claims, and fact-checks in real-time. We've optimized it for political debates where claims repeat frequently."
-
-**Q: "What makes this different from other fact-checkers?"**
-A: "Three things: (1) Real-time audio transcription, (2) TrueFoundry gateway governance and observability, (3) source-aware fact-checking for current events."
-
----
-
-## If Demo Fails
-
-### Backup Plan A: Show Pre-Recorded Results
-Have screenshots of successful fact-checks ready.
-
-### Backup Plan B: Explain the Tech
-"While we wait, let me explain the architecture..."
-- Mistral Voxtral for speech-to-text and read-aloud audio
-- TrueFoundry AI Gateway for model routing, governance, and observability
-- Source-aware model provider configured in TrueFoundry
-
-### Backup Plan C: Show Test Results
 ```bash
-npm run test:truefoundry
+npm run dev:api
+npm run dev
 ```
-Show the automated gateway validation script.
 
----
+Open the app at `http://localhost:8080` or the Vite URL shown in the terminal.
 
-## Closing
+Confirm:
 
-**End with impact:**
-> "Imagine watching a presidential debate where every false claim is flagged with sources and every model request is governed through one gateway. That's what we've built."
+```bash
+curl http://127.0.0.1:8787/api/health
+```
 
-**Call to Action:**
-- "Try it yourself at [your-demo-url]"
-- "Check out the code at github.com/[your-repo]"
-- "Questions?"
+Expected: `geminiConfigured`, `geminiGoogleSearchConfigured`, `mistralTtsConfigured`, and `mistralRealtimeTranscriptionConfigured` are all `true`.
 
----
+### 1. Start With The Product
+
+**Say while showing the Monitor page:**
+
+> "This is FactCheckMe. It turns live speech into a transcript and highlights factual claims inline. The important part is that it does not check partial speech. It waits for complete sentences, asks Gemini whether the sentence is a claim, then uses Gemini's native Google Search grounding for the verdict."
+
+Click the microphone.
+
+If asked for mic permission, allow it.
+
+### 2. Easy False Claim
+
+**Say into the mic:**
+
+> "The Eiffel Tower is in Berlin."
+
+**Point out when the transcript highlights:**
+
+- Red `FALSE` inline highlight
+- Evidence card on the right
+- Source URLs from Gemini grounding metadata
+- Confidence and explanation
+
+**Say:**
+
+> "The app transcribed my speech with Mistral, classified the completed sentence with Gemini, then used Gemini Google Search grounding for the sourced verdict."
+
+### 3. Explain The Architecture
+
+Use this quick sequence:
+
+1. Browser streams PCM16 audio through the local WebSocket proxy to Mistral Realtime.
+2. React displays partial transcription but emits only completed sentences.
+3. A sentence hashmap prevents repeated completed sentences from being checked twice.
+4. Gemini decides whether each completed sentence is a factual claim.
+5. Gemini fact-checks claims with native Google Search grounding enabled.
+6. Node normalizes JSON, attaches grounding sources, and persists the result in SQLite.
+7. React highlights the sentence inline and renders the evidence card.
+
+**Say:**
+
+> "The backend is intentionally simple: React frontend, Node API, SQLite database, Mistral for audio, and Gemini for claim classification plus grounded fact-checking."
+
+### 4. Show A True Claim
+
+**Say:**
+
+> "There are 50 states in the United States."
+
+**Point out:**
+
+- Green `TRUE` inline highlight
+- Same `/api/fact-check` contract
+- Count increments in the dashboard cards
+
+### 5. Show A Non-Claim
+
+**Say:**
+
+> "Thanks everyone for coming today."
+
+**Point out:**
+
+- It appears in the transcript as plain text.
+- No evidence card is created.
+
+**Say:**
+
+> "Gemini classifies this as not a factual claim, so the app does not waste a grounded search request."
+
+### 6. Show History And Stats
+
+Click **History**.
+
+**Say:**
+
+> "Every checked claim is stored in SQLite with verdict, confidence, explanation, sources, and timestamp."
+
+Click **Stats**.
+
+**Say:**
+
+> "The stats page proves the app is more than a prompt demo. It has durable sessions, counts, and a local audit trail."
+
+### 7. Show Read-Aloud
+
+Go back to **Monitor** or **History**, expand a fact card, and click the read-aloud control.
+
+**Say:**
+
+> "Mistral also powers the read-aloud path. The API key stays server-side, and the browser only receives generated audio data."
+
+## Backup CLI Demo
+
+If the microphone or browser misbehaves:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/fact-check \
+  -H 'Content-Type: application/json' \
+  -d '{"claim":"The Eiffel Tower is in Berlin."}'
+```
+
+Expected signs of success:
+
+- `verdict` is `false`
+- `sources` contains real URLs
+- `gemini.mode` is `gemini-google-search`
+- `gemini.grounding.sourceCount` is greater than `0`
+
+Then run:
+
+```bash
+npm run test:gemini
+```
+
+Use that output to show multiple claims, source counts, search query counts, latency, and Gemini model metadata.
+
+## Best Claims
+
+### Reliable
+
+- "The Eiffel Tower is in Berlin."
+- "There are 50 states in the United States."
+- "The Moon is made of cheese."
+- "ChatGPT was released by OpenAI in November 2022."
+
+### More Interesting
+
+- "The Great Wall of China is visible from space."
+- "The inflation rate peaked around 9 percent in 2022."
+- "Lightning never strikes the same place twice."
+
+### Avoid Live
+
+- Highly personal claims
+- Medical advice claims
+- Active legal allegations
+- Claims that require long historical context
+
+## Q&A
+
+**Q: Are we using a separate search service?**
+
+No. The app uses Gemini's native Google Search grounding.
+
+**Q: Where do secrets live?**
+
+Only in server-side `.env`. The frontend never receives Mistral or Gemini keys.
+
+**Q: What database is used?**
+
+SQLite via Node's built-in SQLite module. No Supabase.
+
+**Q: Why wait for completed sentences?**
+
+Partial transcripts change constantly. Fact-checking only completed sentences avoids duplicate checks and bad verdicts on incomplete thoughts.
 
 ## Demo Checklist
 
-**Before Demo:**
-- [ ] API is running (`npm run dev:api`)
-- [ ] App is running (`npm run dev`)
-- [ ] Monitor page is loaded
-- [ ] Microphone permissions granted
-- [ ] Network connection stable
-- [ ] Local SQLite API is reachable (`http://localhost:8787/api/health`)
-- [ ] TrueFoundry gateway env vars are set
-- [ ] Have backup claims written down
-
-**During Demo:**
-- [ ] Speak clearly and slowly
-- [ ] Wait for results before continuing
-- [ ] Point out specific features (confidence, sources, speed)
-- [ ] Show TrueFoundry gateway behavior explicitly
-- [ ] Have backup claims ready if one fails
-
-**After Demo:**
-- [ ] Stop monitoring
-- [ ] Show session stats
-- [ ] Answer questions
-- [ ] Share links/contact info
+- [ ] `.env` includes Mistral and Gemini values
+- [ ] `npm run dev:api` is running
+- [ ] `npm run dev` is running
+- [ ] `/api/health` returns Gemini and Mistral configured flags as `true`
+- [ ] Browser has microphone permission
+- [ ] First CLI smoke test returns `gemini.mode: "gemini-google-search"`
+- [ ] Keep `DEMO_CLAIMS.md` open as backup
+- [ ] Stop listening before switching tabs for a long explanation

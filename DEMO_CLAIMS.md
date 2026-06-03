@@ -67,11 +67,11 @@
 4. "Crime is at an all-time low" *(FALSE - varies by location and metric)*
 5. "The stock market is at record highs" *(TRUE/PARTIAL - depends on when stated)*
 
-**Repeated claims (for gateway cache/model-routing demo):**
+**Repeated claims (for sentence hashmap demo):**
 - First: "The unemployment rate is 4.1 percent"
 - Later: "Unemployment stands at 4.1%"
 - Later: "We have 4.1 percent unemployment"
-*(Use these to check whether the configured gateway/model reports cache behavior and stable answers)*
+*(Use these to show consistent grounded answers; exact repeats should be skipped by the sentence hashmap)*
 
 ### For Science/Health Demo
 
@@ -114,11 +114,11 @@ Use this sequence to show speed:
 1. "The Earth orbits the Sun" *(TRUE - fast)*
 2. "There are 50 states in the US" *(TRUE - fast)*
 3. "The Moon is made of cheese" *(FALSE - fast)*
-4. "Unemployment is 4 percent" *(first gateway/model request)*
-5. "The unemployment rate is 4%" *(repeat through gateway)*
-6. "Unemployment stands at 4 percent" *(repeat through gateway)*
+4. "Unemployment is 4 percent" *(grounded Gemini request)*
+5. "The unemployment rate is 4%" *(same idea, new sentence wording)*
+6. "Unemployment stands at 4 percent" *(same idea, new sentence wording)*
 
-This shows both the fact-checking flow and whether the configured gateway/model reports caching or consistent repeated-claim behavior.
+This shows both the fact-checking flow and whether grounded Gemini answers stay consistent across equivalent wording.
 
 ---
 
@@ -179,11 +179,11 @@ This shows both the fact-checking flow and whether the configured gateway/model 
 8. Say PARTIAL claim: "Crime is up 30%"
 9. Show all three different verdicts
 
-### Act 3: Gateway Repeat Demo (30 sec)
+### Act 3: Repeated Claim Demo (30 sec)
 10. Say: "Inflation peaked at 9% in 2022"
 11. Wait for verification (slow)
 12. Say: "Inflation was at 9 percent in 2022"
-13. Show whether TrueFoundry reports gateway cache metadata or improved repeated-claim behavior
+13. Show whether equivalent claims produce consistent grounded answers
 
 ### Act 4: Controversial Claim (30 sec)
 14. Say: "Jeffrey Epstein was an Israeli agent"
@@ -193,14 +193,14 @@ This shows both the fact-checking flow and whether the configured gateway/model 
 ### Act 5: Real Debate Scenario (1 min)
 17. Play a clip of a political debate
 18. Show real-time fact-checking
-19. Highlight repeated claims being routed and observed through the gateway
+19. Highlight claims being grounded through Gemini Search as they appear
 
 ---
 
 ## Pro Tips for Demo
 
 1. **Start with easy wins** - Use obviously true/false claims first
-2. **Show the gateway behavior** - Repeat a claim worded differently and compare latency/source consistency
+2. **Show repeat behavior** - Repeat a claim worded differently and compare source consistency
 3. **Build to controversy** - Save politically charged claims for impact
 4. **Have backups** - If one claim fails, have alternatives ready
 5. **Explain the sources** - Point out real URLs returned by the configured source-aware model
@@ -225,9 +225,9 @@ This shows both the fact-checking flow and whether the configured gateway/model 
 
 ---
 
-## Gateway Prep for Debates
+## Prep for Debates
 
-Before a political debate, configure TrueFoundry routing, budgets, and prompts around common claims:
+Before a political debate, prepare common claims to use as reliable demo anchors:
 
 ```bash
 # Common political talking points
@@ -239,12 +239,12 @@ Before a political debate, configure TrueFoundry routing, budgets, and prompts a
 - "Stock market at record highs"
 ```
 
-Then during the debate, every model request is governed and visible in TrueFoundry.
+Then during the debate, you can compare live claims against grounded Gemini results and the SQLite audit trail.
 
 ---
 
 **Remember:** The demo should show:
 1. ✅ Accuracy (true/false detection)
-2. ⚡ Governance (TrueFoundry routing, cache metadata, budgets)
-3. 🔍 Sources (real URLs from the configured source-aware model)
+2. ⚡ Live flow (completed-sentence filtering and repeated-sentence skipping)
+3. 🔍 Sources (real URLs from Gemini Google Search grounding)
 4. 🧠 Intelligence (consistent repeated-claim handling)

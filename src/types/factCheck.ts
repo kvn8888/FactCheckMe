@@ -17,7 +17,7 @@ export interface FactCheckResult {
   timestamp: Date;
   sources: FactCheckSource[];
   explanation?: string;
-  fromCache?: boolean; // True if gateway cache metadata was present
+  fromCache?: boolean; // True if provider cache metadata was present
 }
 
 // Monitoring session status
@@ -52,17 +52,4 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-// WebSocket message types
-export type WebSocketMessageType = 
-  | 'fact_result'
-  | 'status_update'
-  | 'stats_update'
-  | 'error';
-
-export interface WebSocketMessage {
-  type: WebSocketMessageType;
-  payload: unknown;
-  timestamp: Date;
 }

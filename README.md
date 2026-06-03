@@ -1,14 +1,14 @@
 # FactCheckMe
 
-Real-time audio fact-checking application that listens to speech, identifies claims, and verifies them instantly.
+Real-time audio fact-checking application that listens to speech, identifies factual claims, and verifies them with sourced web grounding.
 
 ## Features
 
-- Live audio transcription using Mistral Voxtral speech-to-text
-- Automatic claim detection and extraction
-- Real-time fact verification through TrueFoundry AI Gateway
+- Live audio transcription using Mistral Voxtral realtime speech-to-text
+- Persistent transcript UI with inline claim highlighting
+- Automatic completed-sentence claim detection
+- Real-time fact verification through Gemini with native Google Search grounding
 - Read-aloud fact-check summaries using Mistral Voxtral TTS
-- Gateway-level governance for model routing, caching, rate limits, budgets, and observability
 - History tracking of checked claims
 - Statistics dashboard
 
@@ -20,10 +20,8 @@ Real-time audio fact-checking application that listens to speech, identifies cla
 - shadcn/ui
 - Node HTTP API
 - SQLite
-- Mistral Voxtral STT
-- TrueFoundry AI Gateway
-- Gateway-backed LLM provider with source-aware fact checking
-- Mistral Voxtral TTS
+- Mistral Voxtral STT and TTS
+- Gemini API with native Google Search grounding
 
 ## Getting Started
 
@@ -38,57 +36,36 @@ npm install
 Create a local `.env` file:
 
 ```bash
+VITE_API_URL=http://localhost:8787
+
 MISTRAL_API_KEY=your_mistral_api_key
-MISTRAL_TRANSCRIPTION_MODEL=voxtral-mini-latest
-MISTRAL_TRANSCRIPTION_LANGUAGE=en
+MISTRAL_REALTIME_TRANSCRIPTION_MODEL=voxtral-mini-transcribe-realtime-2602
+MISTRAL_REALTIME_DELAY_MS=1000
 MISTRAL_TTS_MODEL=voxtral-mini-tts-2603
 MISTRAL_TTS_RESPONSE_FORMAT=mp3
 MISTRAL_TTS_REF_AUDIO_PATH=data/mistral-reference.aiff
-TRUEFOUNDRY_API_KEY=your_truefoundry_api_key
-TRUEFOUNDRY_GATEWAY_BASE_URL=https://gateway.truefoundry.ai
-TRUEFOUNDRY_MODEL_ID=google-gemini/gemini-3.5-flash
-TRUEFOUNDRY_AGENT_ITERATION_LIMIT=5
-VITE_API_URL=http://localhost:8787
+
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.5-flash
 ```
 
-Pick `TRUEFOUNDRY_MODEL_ID` from the TrueFoundry Playground. SQLite data is stored in `data/factcheckme.sqlite` by default.
+SQLite data is stored in `data/factcheckme.sqlite` by default.
 
-To force sourced fact checks through Tavily MCP, configure one of these TrueFoundry Agent options:
+### 3. How Fact Checking Works
 
-```bash
-# Option A: use an Agent App already configured with the Tavily MCP server.
-TRUEFOUNDRY_AGENT_APP_ID=your_agent_app_id
+Microphone audio is streamed as PCM16 through the local WebSocket proxy to Mistral's realtime transcription endpoint. The frontend displays partial transcription deltas, but only completed sentences are sent to the backend.
 
-# Option B: pass the Tavily MCP server directly to the Agent endpoint.
-TRUEFOUNDRY_MCP_SERVER_FQN=your_tavily_mcp_integration_fqn
-# or:
-TRUEFOUNDRY_MCP_SERVER_URL=https://gateway.truefoundry.ai/mcp/your-server
+For each completed sentence:
 
-# Optional: restrict tools. Omit this to enable all tools exposed by that MCP server.
-TRUEFOUNDRY_MCP_TOOL_NAMES=tavily_search,tavily_extract
+1. The frontend normalizes the sentence into a hashmap key so repeated sentences are not checked twice.
+2. Gemini classifies whether the sentence is a verifiable factual claim.
+3. If it is not a claim, the transcript stays plain text.
+4. If it is a claim, the backend calls Gemini `generateContent` with the native `google_search` tool enabled.
+5. The backend normalizes the JSON verdict, attaches sources from Gemini grounding metadata, persists the result in SQLite, and returns the standard fact-check response to the frontend.
 
-# Optional: defaults to TRUEFOUNDRY_API_KEY when unset.
-TRUEFOUNDRY_MCP_AUTH_TOKEN=your_mcp_gateway_token
+Expanded fact-check cards can also read results aloud through Mistral's `audio/speech` endpoint. API keys are never exposed to frontend code. Mistral TTS requires either `MISTRAL_TTS_VOICE_ID` or a reference audio file at `MISTRAL_TTS_REF_AUDIO_PATH`.
 
-# Optional: forwarded via TrueFoundry's x-tfy-mcp-headers auth override
-# when the Tavily MCP server needs per-request header credentials.
-TAVILY_API_KEY=your_tavily_api_key
-```
-
-### 3. What is TrueFoundry doing here?
-
-The Node API sends fact-check prompts through TrueFoundry. If `TRUEFOUNDRY_MCP_SERVER_URL` is set, it first calls `tavily_search` through TrueFoundry's MCP Gateway, then sends those source snippets through TrueFoundry Chat Completions for the verdict. If `TRUEFOUNDRY_AGENT_USE_TOOL_CALLS=true` is set, the app can instead use TrueFoundry Agent tool-calling mode. TrueFoundry sits between FactCheckMe, the model provider, and MCP tools so LLM/tool traffic can be governed centrally:
-
-- **Observability** for model requests and token usage
-- **Rate limits and budgets** to control spend
-- **Gateway caching** where supported by the configured provider/model
-- **Model routing and fallbacks** without changing the frontend
-- **Guardrails** and access control configured in TrueFoundry
-- **MCP tool access** for Tavily-backed search and source retrieval
-
-Microphone audio is recorded in short browser chunks and sent to the local API, which calls Mistral's `audio/transcriptions` endpoint with `MISTRAL_API_KEY`. Expanded fact-check cards can also read results aloud through Mistral's `audio/speech` endpoint. The Mistral key is never exposed to frontend code. Mistral TTS requires either `MISTRAL_TTS_VOICE_ID` or a reference audio file at `MISTRAL_TTS_REF_AUDIO_PATH`.
-
-### 4. Start Development Server
+## Start Development Server
 
 ```bash
 npm run dev:api
@@ -108,4 +85,5 @@ npm run dev:full
 - `npm run dev:full` - Start the API and Vite together
 - `npm run build` - Build for production
 - `npm run test` - Run tests
+- `npm run test:gemini` - Run a local Gemini Google Search smoke test against the API
 - `npm run lint` - Run linter

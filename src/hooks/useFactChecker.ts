@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { normalizeSentence } from '@/lib/sentences';
 import { createSession, endSession, factCheckClaim } from '@/services/api';
 import type { FactCheckResult, MonitoringStatus } from '@/types/factCheck';
 
@@ -7,13 +8,13 @@ interface UseFactCheckerOptions {
   onError?: (error: string) => void;
 }
 
-// Throttle interval in ms - wait at least this long between API calls
-// With paid Gemini, we can be more responsive
-const THROTTLE_INTERVAL = 2000;
+const THROTTLE_INTERVAL = 500;
+export type SentenceFactCheck = FactCheckResult | null | 'pending' | 'error';
 
 export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<FactCheckResult[]>([]);
+  const [sentenceFactChecks, setSentenceFactChecks] = useState<Record<string, SentenceFactCheck>>({});
   const [status, setStatus] = useState<MonitoringStatus>({
     isActive: false,
     startedAt: null,
@@ -23,10 +24,9 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   });
   const sessionIdRef = useRef<string | null>(null);
   const processingQueueRef = useRef<string[]>([]);
+  const sentenceFactChecksRef = useRef<Map<string, SentenceFactCheck>>(new Map());
   const isProcessingRef = useRef(false);
-  const textBufferRef = useRef<string[]>([]);
-  const lastApiCallRef = useRef<number>(0);
-  const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastApiCallRef = useRef(0);
 
   const startSession = useCallback(async () => {
     try {
@@ -37,8 +37,8 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       }
 
       return response.data.id;
-    } catch (e) {
-      console.error('Session creation error:', e);
+    } catch (error) {
+      console.error('Session creation error:', error);
       return null;
     }
   }, []);
@@ -51,48 +51,58 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
       if (!response.success) {
         console.error('Failed to end session:', response.error);
       }
-    } catch (e) {
-      console.error('Failed to end session:', e);
+    } catch (error) {
+      console.error('Failed to end session:', error);
     }
   }, []);
 
   const processQueue = useCallback(async () => {
-    if (isProcessingRef.current || processingQueueRef.current.length === 0) {
-      return;
-    }
+    if (isProcessingRef.current || processingQueueRef.current.length === 0) return;
 
     isProcessingRef.current = true;
     setIsProcessing(true);
 
     while (processingQueueRef.current.length > 0) {
-      const claim = processingQueueRef.current.shift()!;
+      const sentence = processingQueueRef.current.shift()!;
+      const sentenceKey = normalizeSentence(sentence);
+      const delay = THROTTLE_INTERVAL - (Date.now() - lastApiCallRef.current);
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      lastApiCallRef.current = Date.now();
 
       try {
-        const response = await factCheckClaim(claim, sessionIdRef.current);
+        const response = await factCheckClaim(sentence, sessionIdRef.current);
 
         if (!response.success || !response.data) {
+          sentenceFactChecksRef.current.delete(sentenceKey);
+          setSentenceFactChecks((current) => ({ ...current, [sentenceKey]: 'error' }));
           console.error('Fact-check error:', response.error);
-          onError?.(response.error || 'Failed to fact-check claim');
+          onError?.(response.error || 'Failed to fact-check sentence');
           continue;
         }
 
-        // Skip if no claim was found in the speech
         if ('noClaim' in response.data) {
-          console.log('No factual claim detected in speech');
+          sentenceFactChecksRef.current.set(sentenceKey, null);
+          setSentenceFactChecks((current) => ({ ...current, [sentenceKey]: null }));
           continue;
         }
 
         const result: FactCheckResult = response.data;
-
-        setResults((prev) => [result, ...prev]);
-        setStatus((prev) => ({
-          ...prev,
-          factsChecked: prev.factsChecked + 1,
+        sentenceFactChecksRef.current.set(sentenceKey, result);
+        setSentenceFactChecks((current) => ({ ...current, [sentenceKey]: result }));
+        setResults((current) => [result, ...current]);
+        setStatus((current) => ({
+          ...current,
+          claimsDetected: current.claimsDetected + 1,
+          factsChecked: current.factsChecked + 1,
         }));
         onNewResult?.(result);
-      } catch (e) {
-        console.error('Processing error:', e);
-        onError?.('Failed to process claim');
+      } catch (error) {
+        sentenceFactChecksRef.current.delete(sentenceKey);
+        setSentenceFactChecks((current) => ({ ...current, [sentenceKey]: 'error' }));
+        console.error('Processing error:', error);
+        onError?.('Failed to process sentence');
       }
     }
 
@@ -100,63 +110,27 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
     setIsProcessing(false);
   }, [onNewResult, onError]);
 
-  const processBufferedText = useCallback(async () => {
-    if (textBufferRef.current.length === 0) return;
+  const processText = useCallback((sentence: string) => {
+    const sentenceKey = normalizeSentence(sentence);
+    if (!sentenceKey || sentenceFactChecksRef.current.has(sentenceKey)) return;
 
-    // Combine all buffered text into one request
-    const combinedText = textBufferRef.current.join(' ');
-    textBufferRef.current = [];
-
-    // Skip empty or very short text
-    if (combinedText.trim().length < 15) return;
-
-    try {
-      // Send directly to fact-check (it will extract and check in one call)
-      setStatus((prev) => ({
-        ...prev,
-        claimsDetected: prev.claimsDetected + 1,
-      }));
-
-      processingQueueRef.current.push(combinedText);
-      processQueue();
-    } catch (e) {
-      console.error('Text processing error:', e);
-    }
-  }, [processQueue]);
-
-  const processText = useCallback(async (text: string) => {
-    setStatus((prev) => ({
-      ...prev,
-      sentencesProcessed: prev.sentencesProcessed + 1,
+    sentenceFactChecksRef.current.set(sentenceKey, 'pending');
+    setSentenceFactChecks((current) => ({ ...current, [sentenceKey]: 'pending' }));
+    processingQueueRef.current.push(sentence.trim());
+    setStatus((current) => ({
+      ...current,
+      sentencesProcessed: current.sentencesProcessed + 1,
     }));
-
-    // Add text to buffer
-    textBufferRef.current.push(text);
-
-    // Check if we can make an API call (throttling)
-    const now = Date.now();
-    const timeSinceLastCall = now - lastApiCallRef.current;
-
-    if (timeSinceLastCall >= THROTTLE_INTERVAL) {
-      // Can call immediately
-      lastApiCallRef.current = now;
-      processBufferedText();
-    } else {
-      // Schedule a call after the throttle interval
-      if (throttleTimeoutRef.current) {
-        clearTimeout(throttleTimeoutRef.current);
-      }
-      throttleTimeoutRef.current = setTimeout(() => {
-        lastApiCallRef.current = Date.now();
-        processBufferedText();
-      }, THROTTLE_INTERVAL - timeSinceLastCall);
-    }
-  }, [processBufferedText]);
+    void processQueue();
+  }, [processQueue]);
 
   const startMonitoring = useCallback(async () => {
     const sessionId = await startSession();
     sessionIdRef.current = sessionId;
-
+    processingQueueRef.current = [];
+    sentenceFactChecksRef.current.clear();
+    setSentenceFactChecks({});
+    lastApiCallRef.current = 0;
     setStatus({
       isActive: true,
       startedAt: new Date(),
@@ -168,39 +142,27 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   }, [startSession]);
 
   const stopMonitoring = useCallback(async () => {
-    // Process any remaining buffered text immediately
-    if (textBufferRef.current.length > 0) {
-      await processBufferedText();
-    }
-
-    // Clear throttle timeout (no more new text will be processed)
-    if (throttleTimeoutRef.current) {
-      clearTimeout(throttleTimeoutRef.current);
-      throttleTimeoutRef.current = null;
-    }
-
-    // Mark monitoring as inactive, but let processing continue in background
-    setStatus((prev) => ({
-      ...prev,
+    setStatus((current) => ({
+      ...current,
       isActive: false,
     }));
 
-    // End session after a delay to allow background processing to complete
-    // This doesn't block the UI - session just gets marked as ended later
     setTimeout(async () => {
-      // Wait for processing to finish before ending session
       while (isProcessingRef.current || processingQueueRef.current.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
       await finishSession();
       sessionIdRef.current = null;
     }, 0);
-  }, [finishSession, processBufferedText]);
+  }, [finishSession]);
 
   const clearResults = useCallback(() => {
+    processingQueueRef.current = [];
+    sentenceFactChecksRef.current.clear();
+    setSentenceFactChecks({});
     setResults([]);
-    setStatus((prev) => ({
-      ...prev,
+    setStatus((current) => ({
+      ...current,
       sentencesProcessed: 0,
       claimsDetected: 0,
       factsChecked: 0,
@@ -210,6 +172,7 @@ export function useFactChecker({ onNewResult, onError }: UseFactCheckerOptions =
   return {
     isProcessing,
     results,
+    sentenceFactChecks,
     status,
     processText,
     startMonitoring,

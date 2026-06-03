@@ -15,10 +15,13 @@ try {
 
 const API_BASE_URL = process.env.VITE_API_URL || env.VITE_API_URL || 'http://localhost:8787';
 const claims = [
-  'The Earth is round.',
-  'The Eiffel Tower is in Berlin.',
-  'Lightning never strikes the same place twice.',
+  { text: 'The Earth is round.', label: 'true claim' },
+  { text: 'The Eiffel Tower is in Berlin.', label: 'false claim' },
+  { text: 'Vitamin C always prevents colds.', label: 'misleading claim' },
+  { text: 'Hello everyone, welcome back.', label: 'non-claim', expectNoClaim: true },
+  { text: 'The Earth is round.', label: 'repeated completed sentence' },
 ];
+const validVerdicts = new Set(['true', 'false', 'partial', 'unverifiable']);
 
 const log = (message, color = 'reset') => {
   const colors = {
@@ -58,35 +61,47 @@ async function main() {
   log('Start the backend first with: npm run dev:api\n', 'yellow');
 
   const health = await getJson('/api/health');
-  log(`Health: ok=${health.ok}, trueFoundryConfigured=${health.trueFoundryConfigured}`, 'cyan');
+  log(
+    `Health: ok=${health.ok}, geminiConfigured=${health.geminiConfigured}, geminiGoogleSearchConfigured=${health.geminiGoogleSearchConfigured}`,
+    'cyan',
+  );
+  if (!health.geminiConfigured) {
+    throw new Error('GEMINI_API_KEY is not configured. Add a Gemini API key to .env before running sourced fact-check smoke tests.');
+  }
 
   const session = await postJson('/api/sessions', {});
 
-  for (const claim of claims) {
+  for (const { text: claim, label, expectNoClaim = false } of claims) {
     const started = Date.now();
     const result = await postJson('/api/fact-check', { claim, sessionId: session.id });
     const elapsed = Date.now() - started;
 
     if (result.noClaim) {
-      log(`No claim detected: ${claim}`, 'yellow');
+      if (!expectNoClaim) throw new Error(`Unexpected no-claim result for ${label}: ${claim}`);
+      log(`No claim detected (${label}, ${elapsed}ms): ${claim}`, 'yellow');
       continue;
     }
 
-    const model = result.gateway?.model || 'unknown-model';
-    const provider = result.gateway?.provider || 'unknown-provider';
-    const mode = result.gateway?.mode || 'unknown-mode';
-    const mcpServer = result.gateway?.mcp?.server || result.gateway?.mcp?.agentAppId || 'none';
+    if (expectNoClaim) throw new Error(`Expected no-claim result for ${label}: ${claim}`);
+    if (!validVerdicts.has(result.verdict)) throw new Error(`Invalid verdict for ${label}: ${result.verdict}`);
+    if (result.confidence < 0 || result.confidence > 100) {
+      throw new Error(`Invalid confidence for ${label}: ${result.confidence}`);
+    }
+
+    const model = result.gemini?.model || 'unknown-model';
+    const provider = result.gemini?.provider || 'unknown-provider';
+    const mode = result.gemini?.mode || 'unknown-mode';
+    const searchQueries = result.gemini?.grounding?.webSearchQueries?.length || 0;
     const sourceCount = Array.isArray(result.sources) ? result.sources.length : 0;
     const sourceLabel = sourceCount === 1 ? 'source' : 'sources';
-    const cacheLabel = result.fromCache ? 'cache metadata present' : 'fresh/no cache metadata';
+    if (sourceCount === 0) throw new Error(`No sources returned for ${label}: ${claim}`);
 
     log(
-      `${result.verdict.toUpperCase()} (${result.confidence}%, ${sourceCount} ${sourceLabel}, ${elapsed}ms, ${cacheLabel})`,
+      `${result.verdict.toUpperCase()} (${label}, ${result.confidence}%, ${sourceCount} ${sourceLabel}, ${searchQueries} search queries, ${elapsed}ms)`,
       sourceCount > 0 ? 'green' : 'yellow',
     );
     console.log(`  claim: ${result.claim}`);
-    console.log(`  gateway: ${provider} / ${model} / ${mode}`);
-    console.log(`  mcp: ${mcpServer}`);
+    console.log(`  gemini: ${provider} / ${model} / ${mode}`);
   }
 
   await postJson(`/api/sessions/${session.id}/end`, {});

@@ -1,59 +1,57 @@
-# DEMO QUICK CARD - Print This!
+# DEMO QUICK CARD - Print This
 
-## THE FLOW (2 minutes total)
+## The Flow
 
-### 1. BASIC (30s)
-**Say:** "The unemployment rate is 4.2 percent"
-**Show:** Verdict + Sources (2-3s wait)
-**Explain:** "Source-aware model request through TrueFoundry"
+### 1. Basic
 
-### 2. GATEWAY REPEAT (30s)
-**Say:** "Unemployment is at 4.2%"
-**Show:** Repeat request latency + sources
-**Explain:** "Same claim through the gateway, with central observability and cache metadata if available"
+**Say:** "The unemployment rate is 4.2 percent."
 
-### 3. CONTROVERSY (30s)
-**Say:** "Jeffrey Epstein was an Israeli agent"
-**Show:** FALSE with debunking sources
-**Explain:** "Even controversial claims get verified"
+**Show:** Inline transcript highlight, verdict, sources.
 
-### 4. WRAP (30s)
-**Show:** Stats dashboard
-**Pitch:** "Every claim goes through one governed gateway, so routing, spend, and logs are centralized"
+**Explain:** "Gemini checks the completed sentence with native Google Search grounding."
 
----
+### 2. Non-Claim
 
-## BACKUP CLAIMS (if main ones fail)
+**Say:** "Thanks everyone for coming today."
 
-**True:** "There are 50 states in the US"
-**False:** "The Moon is made of cheese"
-**Repeat Test:** "50 states" → "The US has 50 states" → "America has fifty states"
+**Show:** Plain transcript text, no evidence card.
 
----
+**Explain:** "Gemini classifies completed sentences first, so non-claims are not searched."
 
-## THE HOOK LINE
-> "Politicians repeat the same 15 claims in every debate. With TrueFoundry in the middle, every verification is observable, governed, and easy to route or cache centrally."
+### 3. False Claim
 
----
+**Say:** "The Moon is made of cheese."
 
-## IF IT BREAKS
-1. Show test results: `npm run test:truefoundry`
+**Show:** Red `FALSE` highlight and evidence card.
+
+### 4. Wrap
+
+**Show:** Stats dashboard.
+
+**Pitch:** "This is a usable live transcript interface, not just a prompt. It transcribes, filters for claims, uses grounded search, and persists an audit trail locally."
+
+## Backup Claims
+
+**True:** "There are 50 states in the US."
+
+**False:** "The Eiffel Tower is in Berlin."
+
+**Misleading:** "Vitamin C always prevents colds."
+
+## Hook Line
+
+> "Most misinformation happens in live speech. FactCheckMe makes the transcript itself the fact-checking surface."
+
+## If It Breaks
+
+1. Show test results: `npm run test:gemini`
 2. Show the architecture diagram
-3. Demo the caching concept manually
+3. Use the CLI backup request
 
----
+## Must Show
 
-## KEY STATS TO MENTION
-- First verification: 2-3 seconds
-- Gateway request logs and token usage in TrueFoundry
-- Cache metadata if the configured gateway/model reports it
-- Works with: Live audio transcription
-
----
-
-## MUST SHOW
-✅ Real source URLs
-✅ Gateway behavior (first vs repeated claim)
-✅ TrueFoundry model/routing visibility
-✅ Confidence scores
-✅ Session statistics
+- Real source URLs
+- Inline transcript highlights
+- Gemini Google Search grounding metadata
+- Confidence scores
+- Session statistics
