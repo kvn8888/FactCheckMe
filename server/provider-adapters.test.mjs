@@ -175,3 +175,9 @@ describe('OpenAI Decisions + evidence + explanation pipeline', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+// Doppler/Foundry deployments commonly use lowercase model identifiers.
+it('canonicalizes the MAI-Transcribe-2 model name without permitting another model', () => {
+  const config = getMaiConfig({ MAI_TRANSCRIBE_ENDPOINT: 'https://example.cognitiveservices.azure.com', MAI_TRANSCRIBE_KEY: 'test-only', MAI_TRANSCRIBE_MODEL: 'mai-transcribe-2' });
+  expect(config.model).toBe('MAI-Transcribe-2');
+});

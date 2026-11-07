@@ -30,10 +30,10 @@ export function getMaiConfig(env = process.env) {
     throw new ApiError(503, 'configuration_error', 'MAI endpoint must be an HTTPS Azure resource origin or supported file transcription endpoint');
   }
   const model = env.MAI_TRANSCRIPTION_MODEL || env.MAI_TRANSCRIBE_MODEL || 'MAI-Transcribe-2';
-  if (model !== 'MAI-Transcribe-2') {
+  if (model.toLowerCase() !== 'mai-transcribe-2') {
     throw new ApiError(503, 'configuration_error', 'This file adapter requires MAI-Transcribe-2');
   }
-  return { apiKey, endpoint: endpoint.origin, model };
+  return { apiKey, endpoint: endpoint.origin, model: 'MAI-Transcribe-2' };
 }
 
 export async function transcribeAudio(buffer, {
