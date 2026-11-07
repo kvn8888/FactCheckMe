@@ -24,7 +24,7 @@ const verdictConfig = {
     textClass: 'text-verdict-false-foreground',
     iconClass: 'text-verdict-false-foreground',
   },
-  partial: {
+  misleading: {
     label: 'MISLEADING',
     Icon: AlertTriangle,
     bgClass: 'bg-verdict-partial',
@@ -86,7 +86,7 @@ export function getVerdictColor(verdict: Verdict): string {
   const colors = {
     true: 'hsl(75 100% 50%)',
     false: 'hsl(0 100% 50%)',
-    partial: 'hsl(45 100% 50%)',
+    misleading: 'hsl(45 100% 50%)',
     unverifiable: 'hsl(0 0% 75%)',
   };
   return colors[verdict];

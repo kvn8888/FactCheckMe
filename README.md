@@ -1,89 +1,94 @@
 # FactCheckMe
 
-Real-time audio fact-checking application that listens to speech, identifies factual claims, and verifies them with sourced web grounding.
+A private, browser-based audio fact checker. It records short audio chunks, transcribes them with **MAI-Transcribe-2**, checks factual claims against web evidence, and shows sourced **true / false / misleading / unverifiable** judgments.
 
-## Features
+## Architecture
 
-- Live audio transcription using Mistral Voxtral realtime speech-to-text
-- Persistent transcript UI with inline claim highlighting
-- Automatic completed-sentence claim detection
-- Real-time fact verification through Gemini with native Google Search grounding
-- Read-aloud fact-check summaries using Mistral Voxtral TTS
-- History tracking of checked claims
-- Statistics dashboard
+- React, TypeScript, Vite, Tailwind and shadcn/ui.
+- Same-origin Node API deployable as a Vercel Function.
+- Azure Speech **MAI-Transcribe-2** file transcription. The browser submits six-second, 16 kHz mono PCM WAV chunks (about 192 KB each). One upload runs at a time with a bounded backlog. This is near-real-time chunked transcription, **not** the separate MAI-Transcribe-2-Streaming preview. Expect chunk duration plus provider latency; word boundaries can cross chunks.
+- OpenAI **Decisions API**, using `gpt-6-luna` by default, for claim detection, freshness assessment and four-way verdict classification. The tentative name `gpt-6.1-luna` is not the documented Decisions model.
+- Exa **lite** for fast cached evidence. Time-sensitive facts, or uncertain freshness, use **auto** with `maxAgeHours: 0`. Search results are evidence candidates, not ground truth.
+- OpenAI **Responses API** writes a structured explanation using only the retrieved sources. Displayed URLs come from Exa, not model-generated links. Refusals, missing evidence, malformed results and low confidence produce `unverifiable`, never `false` by default.
+- Browser `localStorage` retains up to 500 fact checks and 100 sessions. No server database, Supabase, Hyperspell or server-side transcript history. No raw audio is persisted by the application.
+- Browser speech synthesis provides optional read-aloud; available voices depend on the browser/OS and may use their own online services.
 
-## Tech Stack
+Confidence percentages are model estimates, not calibrated guarantees. Check the linked sources, especially for consequential decisions. Source excerpts may omit context. `unverifiable` does not mean false.
 
-- React + TypeScript
-- Vite
-- Tailwind CSS
-- shadcn/ui
-- Node HTTP API
-- SQLite
-- Mistral Voxtral STT and TTS
-- Gemini API with native Google Search grounding
+## Private access
 
-## Getting Started
+Every paid API route checks authentication on the server. The React sign-in screen alone is not the security boundary. Missing authentication configuration fails closed.
 
-### 1. Install Dependencies
+### Recommended Vercel deployment
 
-```bash
-npm install
-```
+1. Create/import the repository as a **Vite** project on Vercel, using Node 22 or newer. `vercel.json` supplies the static output, API route and 120-second function duration.
+2. **Before enabling the app**, set Deployment Protection → **Vercel Authentication → All Deployments**. Verify protection covers the production domain, custom domains, preview deployments and direct deployment URLs. Standard Protection does not protect every production URL. Do not create protection bypass/share links.
+3. Verify in a signed-out/private browser that `/`, `/api/auth/session`, `/api/health` and `/api/fact-check` are intercepted by Vercel sign-in. Confirm an authenticated authorized account can reach them.
+4. Only after that verification, set server environment variable `VERCEL_AUTH_PROTECTED=true`. The application also requires Vercel's own `VERCEL=1`. **This flag asserts that protection is already configured; it does not enable or verify Vercel protection.** Do not disable platform protection while this flag is true. No separate application password is needed in this mode.
+5. Configure the provider environment variables below for the intended deployment environments, then redeploy. Recheck signed-out access on all URL types. Keep protected production and preview scopes aligned.
 
-### 2. Configure Environment Variables
+Changing project access, configuring persistent credentials, connecting a Doppler integration, and deploying are separate setup actions. This code does not provision a Vercel project or automatically sync secrets.
 
-Create a local `.env` file:
+### Local/private password fallback
 
-```bash
-VITE_API_URL=http://localhost:8787
+Leave `VERCEL_AUTH_PROTECTED=false`. Set `APP_PASSWORD_HASH` to a scrypt hash in `scrypt$<32 hex salt>$<128 hex hash>` format and `APP_SESSION_SECRET` to a strong random value of at least 32 characters. `hashPassword()` in `server/auth.mjs` can generate the hash during an explicitly authorized setup. Do not put a real password in shell history, source control, a browser bundle or localStorage.
 
-MISTRAL_API_KEY=your_mistral_api_key
-MISTRAL_REALTIME_TRANSCRIPTION_MODEL=voxtral-mini-transcribe-realtime-2602
-MISTRAL_REALTIME_DELAY_MS=1000
-MISTRAL_TTS_MODEL=voxtral-mini-tts-2603
-MISTRAL_TTS_RESPONSE_FORMAT=mp3
-MISTRAL_TTS_REF_AUDIO_PATH=data/mistral-reference.aiff
+Sign-in issues a signed, eight-hour HttpOnly, SameSite=Strict cookie; production cookies are Secure. Changing the password hash or session secret invalidates existing cookies. POST routes reject cross-origin requests. In-memory request limits are defense in depth **per warm server instance**, not a distributed quota. Use Vercel protection/platform rate limits and provider spending limits as the primary abuse controls.
 
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.5-flash
-```
+## Server environment variables
 
-SQLite data is stored in `data/factcheckme.sqlite` by default.
+Copy `.env.example` only for local setup. Never put a provider credential in a `VITE_*` variable.
 
-### 3. How Fact Checking Works
+| Variable | Purpose |
+| --- | --- |
+| `MAI_TRANSCRIBE_ENDPOINT` (or `AZURE_SPEECH_ENDPOINT`) | HTTPS Azure Speech resource origin, e.g. `https://RESOURCE.cognitiveservices.azure.com` |
+| `MAI_TRANSCRIBE_KEY` (or `AZURE_SPEECH_KEY`) | Key authorized for that resource and MAI transcription |
+| `MAI_TRANSCRIBE_MODEL` (or `MAI_TRANSCRIPTION_MODEL`) | Defaults to `MAI-Transcribe-2` |
+| `OPENAI_API_KEY` | OpenAI project key with access to Decisions and Responses |
+| `OPENAI_DECISIONS_MODEL` | Defaults to `gpt-6-luna`; use a model supported by Decisions |
+| `OPENAI_MODEL` | Defaults to `gpt-6-luna`; Responses explanation model |
+| `EXA_API_KEY` | Exa search key |
+| `EXA_SEARCH_TYPE` | `lite` (default) or `auto`; freshness detection can override lite |
+| `VERCEL_AUTH_PROTECTED` | Explicit native-protection assertion, default false; see security steps above |
+| `APP_PASSWORD_HASH`, `APP_SESSION_SECRET` | Password-mode fallback only |
+| `APP_ORIGIN` | Optional exact canonical origin without trailing slash; otherwise derived from request host |
+| `HOST`, `PORT` | Local API bind address/port; defaults `127.0.0.1:8787` |
 
-Microphone audio is streamed as PCM16 through the local WebSocket proxy to Mistral's realtime transcription endpoint. The frontend displays partial transcription deltas, but only completed sentences are sent to the backend.
+Keep credentials in Doppler. Use its official Vercel integration after approving the target project, environments and credential scope; or use `doppler run --project <project> --config <config> -- npm run dev:api` locally. This repo does not select a Doppler config, download secrets, create keys or configure a persistent integration. Existing differently named Doppler keys need explicit mapping to the names above.
 
-For each completed sentence:
+## Development and verification
 
-1. The frontend normalizes the sentence into a hashmap key so repeated sentences are not checked twice.
-2. Gemini classifies whether the sentence is a verifiable factual claim.
-3. If it is not a claim, the transcript stays plain text.
-4. If it is a claim, the backend calls Gemini `generateContent` with the native `google_search` tool enabled.
-5. The backend normalizes the JSON verdict, attaches sources from Gemini grounding metadata, persists the result in SQLite, and returns the standard fact-check response to the frontend.
-
-Expanded fact-check cards can also read results aloud through Mistral's `audio/speech` endpoint. API keys are never exposed to frontend code. Mistral TTS requires either `MISTRAL_TTS_VOICE_ID` or a reference audio file at `MISTRAL_TTS_REF_AUDIO_PATH`.
-
-## Start Development Server
-
-```bash
+```sh
+npm ci
 npm run dev:api
+# In another terminal; Vite proxies /api to port 8787:
 npm run dev
+
+npm test
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-Or run both from one shell:
+Open the Vite address (default port 8080), sign in, then click the microphone button. Microphone permission is requested only when recording starts. Stopping flushes pending audio and the final incomplete sentence before closing the local session. Navigating away/signing out aborts capture and discards unsent audio. Recording stops safely if transcription falls behind.
 
-```bash
-npm run dev:full
-```
+Provider tests are mocked and spend no API credits. They verify request contracts, evidence safeguards, authentication, request limits, local persistence, cancellation and stop/restart behavior. They do not prove that a particular Azure region/resource, OpenAI account/model or Exa key is provisioned. Perform an authorized live smoke test with a nonsensitive sample after deployment and secret configuration.
 
-## Scripts
+History stays in this browser and origin. It does not sync between devices and can be lost if site data is cleared. Existing SQLite/server history is not automatically copied into localStorage. Clearing history affects this browser only. Blocked/full browser storage falls back to memory with a visible warning. Clearing/signing out does not delete provider-side logs or data governed by Azure/OpenAI/Exa policies. No credentials belong in browser history storage.
 
-- `npm run dev` - Start development server
-- `npm run dev:api` - Start the Node API and SQLite backend
-- `npm run dev:full` - Start the API and Vite together
-- `npm run build` - Build for production
-- `npm run test` - Run tests
-- `npm run test:gemini` - Run a local Gemini Google Search smoke test against the API
-- `npm run lint` - Run linter
+## API surface
+
+- `GET /api/auth/session`: authentication mode/status; contains no credentials or history.
+- `POST /api/auth/login`, `POST /api/auth/logout`: password fallback only.
+- `POST /api/transcribe`: authenticated WAV bytes sent as `application/octet-stream` (Vercel binary-body compatibility), maximum 3.5 MB.
+- `POST /api/fact-check`: authenticated JSON `{ "claim": "..." }`, maximum 2,000 characters.
+- `GET /api/health`: authenticated service status.
+
+All provider keys stay server-side. API errors and server logs omit provider response bodies, transcripts and credentials. There are no history/session database endpoints or wildcard CORS access.
+
+## Provider references
+
+- [MAI-Transcribe-2 REST guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe?pivots=programming-language-rest)
+- [OpenAI Decisions](https://developers.openai.com/api/docs/guides/decisions)
+- [Exa quickstart](https://exa.ai/docs/search/quickstart)
+- [Vercel deployment protection](https://vercel.com/docs/deployment-protection)

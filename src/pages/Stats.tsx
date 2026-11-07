@@ -68,7 +68,7 @@ export default function Stats() {
         totalChecked: 0,
         trueCount: 0,
         falseCount: 0,
-        partialCount: 0,
+        misleadingCount: 0,
         unverifiableCount: 0,
         sessions: [],
       });
@@ -103,7 +103,7 @@ export default function Stats() {
   const verdictBreakdown = [
     { verdict: 'true' as const, count: stats.trueCount, label: 'TRUE', Icon: CheckCircle, bg: 'bg-verdict-true' },
     { verdict: 'false' as const, count: stats.falseCount, label: 'FALSE', Icon: XCircle, bg: 'bg-verdict-false' },
-    { verdict: 'partial' as const, count: stats.partialCount, label: 'PARTIAL', Icon: AlertTriangle, bg: 'bg-verdict-partial' },
+    { verdict: 'misleading' as const, count: stats.misleadingCount, label: 'MISLEADING', Icon: AlertTriangle, bg: 'bg-verdict-partial' },
     { verdict: 'unverifiable' as const, count: stats.unverifiableCount, label: 'UNCLEAR', Icon: HelpCircle, bg: 'bg-verdict-unverifiable' },
   ];
 

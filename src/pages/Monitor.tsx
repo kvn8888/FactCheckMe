@@ -1,11 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useEffect, useState } from 'react';
 import { SearchCheck } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ListenButton } from '@/components/ListenButton';
 import { StatusBar } from '@/components/StatusBar';
 import { FactCard } from '@/components/FactCard';
 import { TranscriptPanel } from '@/components/TranscriptPanel';
-import { useMistralSTT } from '@/hooks/useMistralSTT';
+import { useMaiSTT } from '@/hooks/useMaiSTT';
 import { useFactChecker } from '@/hooks/useFactChecker';
 import { toast } from 'sonner';
 import type { FactCheckResult } from '@/types/factCheck';
@@ -13,9 +13,15 @@ import type { FactCheckResult } from '@/types/factCheck';
 export default function Monitor() {
   const [newResultId, setNewResultId] = useState<string | null>(null);
 
+  const toggling = useRef(false);
+  const [isToggling, setIsToggling] = useState(false);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(highlightTimer.current), []);
+
   const handleNewResult = useCallback((result: FactCheckResult) => {
     setNewResultId(result.id);
-    setTimeout(() => setNewResultId(null), 500);
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setNewResultId(null), 500);
   }, []);
 
   const handleError = useCallback((error: string) => {
@@ -38,31 +44,37 @@ export default function Monitor() {
   const {
     isListening,
     isConnecting,
+    isFinishing,
     startListening,
     stopListening,
     partialTranscript,
     committedTranscripts,
-  } = useMistralSTT({
+  } = useMaiSTT({
     onTranscript: processText,
+    onStopped: () => { void stopMonitoring(); },
     onError: handleError,
   });
 
   const handleToggleListening = useCallback(async () => {
-    if (isListening) {
-      stopListening();
-      toast.success('Stopped listening');
-      stopMonitoring();
+    if (toggling.current) return;
+    toggling.current = true; setIsToggling(true);
+    try {
+      if (isListening) {
+        await stopListening();
+        toast.success('Stopped listening');
 
-      if (isProcessing) {
-        toast.info('Still processing claims in background...', {
-          duration: 3000,
-        });
+        if (isProcessing) {
+          toast.info('Still processing claims in background...', {
+            duration: 3000,
+          });
+        }
+      } else {
+        await startMonitoring();
+        const started = await startListening();
+        if (started) toast.success('Now listening for claims...');
+        else await stopMonitoring();
       }
-    } else {
-      await startMonitoring();
-      const started = await startListening();
-      if (started) toast.success('Now listening for claims...');
-    }
+    } finally { toggling.current = false; setIsToggling(false); }
   }, [isListening, isProcessing, startListening, stopListening, startMonitoring, stopMonitoring]);
 
   const handleSelectFact = useCallback((result: FactCheckResult) => {
@@ -72,7 +84,7 @@ export default function Monitor() {
     });
   }, []);
 
-  const monitorLabel = isConnecting
+  const monitorLabel = isFinishing ? 'Finishing transcription' : isConnecting
     ? 'Connecting'
     : isListening
       ? 'Live verification'
@@ -110,7 +122,7 @@ export default function Monitor() {
               <ListenButton
                 isListening={isListening}
                 onToggle={handleToggleListening}
-                disabled={isConnecting}
+                disabled={isToggling || isConnecting || isFinishing || (!isListening && isProcessing)}
               />
             </div>
 

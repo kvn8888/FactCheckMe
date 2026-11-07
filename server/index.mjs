@@ -1,25 +1,6 @@
 import { createServer } from 'node:http';
-import { HOST, PORT } from './config.mjs';
-import { createDatabase } from './database.mjs';
-import { toPublicError } from './errors.mjs';
-import { json } from './http-utils.mjs';
-import { attachRealtimeTranscription } from './realtime.mjs';
-import { createRouteHandler } from './routes.mjs';
+import handler from './handler.mjs';
 
-const database = createDatabase();
-const route = createRouteHandler({ database });
-
-const server = createServer((req, res) => {
-  route(req, res).catch((error) => {
-    console.error(error);
-    const { statusCode, payload } = toPublicError(error);
-    json(res, statusCode, payload);
-  });
-});
-
-attachRealtimeTranscription(server);
-
-server.listen(PORT, HOST, () => {
-  console.log(`FactCheckMe API listening on http://${HOST}:${PORT}`);
-  console.log(`SQLite database: ${database.path}`);
-});
+const port = Number(process.env.PORT || 8787);
+const host = process.env.HOST || '127.0.0.1';
+createServer(handler).listen(port, host, () => console.log(`FactCheckMe API listening on http://${host}:${port}`));

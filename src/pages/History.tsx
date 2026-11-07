@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { FactCheckResult, Verdict } from '@/types/factCheck';
 
-const verdictFilters: (Verdict | 'all')[] = ['all', 'true', 'false', 'partial', 'unverifiable'];
+const verdictFilters: (Verdict | 'all')[] = ['all', 'true', 'false', 'misleading', 'unverifiable'];
 
 export default function History() {
   const [results, setResults] = useState<FactCheckResult[]>([]);

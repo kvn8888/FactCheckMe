@@ -30,16 +30,6 @@ export const toPublicError = (error) => {
     };
   }
 
-  if (message.startsWith('Gemini API error') || message.startsWith('Mistral')) {
-    return {
-      statusCode: 502,
-      payload: {
-        error: 'Upstream provider request failed',
-        code: 'provider_error',
-      },
-    };
-  }
-
   return {
     statusCode: 500,
     payload: {

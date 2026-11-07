@@ -27,7 +27,7 @@ describe('TranscriptPanel', () => {
         sentenceFactChecks={{
           [normalizeSentence(trueClaim)]: result(trueClaim, 'true'),
           [normalizeSentence(falseClaim)]: result(falseClaim, 'false'),
-          [normalizeSentence(misleadingClaim)]: result(misleadingClaim, 'partial'),
+          [normalizeSentence(misleadingClaim)]: result(misleadingClaim, 'misleading'),
           [normalizeSentence(nonClaim)]: null,
         }}
         isListening

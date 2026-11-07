@@ -1,5 +1,5 @@
 // Verdict types for fact-check results
-export type Verdict = 'true' | 'false' | 'partial' | 'unverifiable';
+export type Verdict = 'true' | 'false' | 'misleading' | 'unverifiable';
 
 // Source reference for a fact-check
 export interface FactCheckSource {
@@ -34,7 +34,7 @@ export interface FactCheckStats {
   totalChecked: number;
   trueCount: number;
   falseCount: number;
-  partialCount: number;
+  misleadingCount: number;
   unverifiableCount: number;
   sessions: SessionRecord[];
 }

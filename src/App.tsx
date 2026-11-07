@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthGate } from "@/components/AuthGate";
 import { BottomNav } from "@/components/BottomNav";
 import Monitor from "./pages/Monitor";
 import History from "./pages/History";
@@ -12,6 +13,7 @@ const App = () => (
   <TooltipProvider>
     <Toaster />
     <Sonner />
+    <AuthGate>
     <BrowserRouter>
       <div className="min-h-screen bg-background">
         <main className="h-[calc(100vh-64px)]">
@@ -25,6 +27,7 @@ const App = () => (
         <BottomNav />
       </div>
     </BrowserRouter>
+    </AuthGate>
   </TooltipProvider>
 );
 

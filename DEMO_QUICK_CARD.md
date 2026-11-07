@@ -1,57 +1,12 @@
-# DEMO QUICK CARD - Print This
+# FactCheckMe demo quick card
 
-## The Flow
+- Verify private sign-in before demonstrating paid API endpoints.
+- Speak a complete factual sentence, then allow six seconds plus provider latency.
+- Open the verdict card and inspect the actual evidence links.
+- Explain: MAI transcription, Decisions classification, Exa search, Responses explanation.
+- Missing evidence is **unverifiable**, not false. Confidence is a model estimate.
+- Show stop/final flush, browser-only history, reload persistence, and read-aloud.
+- No server database, no cross-device history, no semantic cache.
+- Use `npm test && npm run typecheck && npm run lint && npm run build` for offline validation.
 
-### 1. Basic
-
-**Say:** "The unemployment rate is 4.2 percent."
-
-**Show:** Inline transcript highlight, verdict, sources.
-
-**Explain:** "Gemini checks the completed sentence with native Google Search grounding."
-
-### 2. Non-Claim
-
-**Say:** "Thanks everyone for coming today."
-
-**Show:** Plain transcript text, no evidence card.
-
-**Explain:** "Gemini classifies completed sentences first, so non-claims are not searched."
-
-### 3. False Claim
-
-**Say:** "The Moon is made of cheese."
-
-**Show:** Red `FALSE` highlight and evidence card.
-
-### 4. Wrap
-
-**Show:** Stats dashboard.
-
-**Pitch:** "This is a usable live transcript interface, not just a prompt. It transcribes, filters for claims, uses grounded search, and persists an audit trail locally."
-
-## Backup Claims
-
-**True:** "There are 50 states in the US."
-
-**False:** "The Eiffel Tower is in Berlin."
-
-**Misleading:** "Vitamin C always prevents colds."
-
-## Hook Line
-
-> "Most misinformation happens in live speech. FactCheckMe makes the transcript itself the fact-checking surface."
-
-## If It Breaks
-
-1. Show test results: `npm run test:gemini`
-2. Show the architecture diagram
-3. Use the CLI backup request
-
-## Must Show
-
-- Real source URLs
-- Inline transcript highlights
-- Gemini Google Search grounding metadata
-- Confidence scores
-- Session statistics
+See README.md for provider setup and Vercel All Deployments protection.

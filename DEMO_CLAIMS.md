@@ -114,11 +114,11 @@ Use this sequence to show speed:
 1. "The Earth orbits the Sun" *(TRUE - fast)*
 2. "There are 50 states in the US" *(TRUE - fast)*
 3. "The Moon is made of cheese" *(FALSE - fast)*
-4. "Unemployment is 4 percent" *(grounded Gemini request)*
+4. "Unemployment is 4 percent" *(evidence-based fact-check request)*
 5. "The unemployment rate is 4%" *(same idea, new sentence wording)*
 6. "Unemployment stands at 4 percent" *(same idea, new sentence wording)*
 
-This shows both the fact-checking flow and whether grounded Gemini answers stay consistent across equivalent wording.
+This shows both the fact-checking flow and whether evidence-based answers stay consistent across equivalent wording.
 
 ---
 
@@ -193,7 +193,7 @@ This shows both the fact-checking flow and whether grounded Gemini answers stay 
 ### Act 5: Real Debate Scenario (1 min)
 17. Play a clip of a political debate
 18. Show real-time fact-checking
-19. Highlight claims being grounded through Gemini Search as they appear
+19. Highlight claims being grounded through Exa search as they appear
 
 ---
 
@@ -239,12 +239,12 @@ Before a political debate, prepare common claims to use as reliable demo anchors
 - "Stock market at record highs"
 ```
 
-Then during the debate, you can compare live claims against grounded Gemini results and the SQLite audit trail.
+Then during the debate, you can compare live claims against sourced results and browser-local history.
 
 ---
 
 **Remember:** The demo should show:
 1. ✅ Accuracy (true/false detection)
 2. ⚡ Live flow (completed-sentence filtering and repeated-sentence skipping)
-3. 🔍 Sources (real URLs from Gemini Google Search grounding)
+3. 🔍 Sources (real URLs from Exa evidence)
 4. 🧠 Intelligence (consistent repeated-claim handling)

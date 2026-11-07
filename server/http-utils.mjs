@@ -1,35 +1,57 @@
 import { ApiError } from './errors.mjs';
 
-export const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-  'Content-Type': 'application/json',
-};
-
-export const json = (res, statusCode, payload) => {
-  res.writeHead(statusCode, corsHeaders);
+export const json = (res, statusCode, payload, extraHeaders = {}) => {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
+  });
   res.end(JSON.stringify(payload));
 };
 
-export const readJson = async (req, maxBytes = 1_000_000) => {
+export async function readBody(req, maxBytes = 3_500_000) {
+  if (Number(req.headers['content-length']) > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body is too large');
+  // Vercel may supply an already parsed body. Never bypass the size check.
+  if (req.body !== undefined) {
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+    if (body.length > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body is too large');
+    return body;
+  }
   const chunks = [];
-  let totalBytes = 0;
-
+  let total = 0;
   for await (const chunk of req) {
-    totalBytes += chunk.length;
-    if (totalBytes > maxBytes) {
-      throw new ApiError(413, 'payload_too_large', 'Request body is too large');
-    }
-    chunks.push(chunk);
+    const data = Buffer.from(chunk);
+    total += data.length;
+    if (total > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body is too large');
+    chunks.push(data);
   }
+  return Buffer.concat(chunks);
+}
 
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return {};
-
+export async function readJson(req, maxBytes = 16_000) {
+  if (String(req.headers['content-type'] || '').split(';')[0] !== 'application/json') throw new ApiError(415, 'json_required', 'Content-Type must be application/json');
   try {
-    return JSON.parse(raw);
-  } catch {
-    throw new ApiError(400, 'invalid_json', 'Request body must be valid JSON');
+    const parsed = JSON.parse((await readBody(req, maxBytes)).toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected object');
+    return parsed;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(400, 'invalid_json', 'Request body must be a JSON object');
   }
-};
+}
+
+export async function withRequestSignal(req, res, operation, timeoutMs = 115_000) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(new ApiError(499, 'request_cancelled', 'Request was cancelled'));
+  const timer = setTimeout(() => controller.abort(new ApiError(504, 'request_timeout', 'Request timed out')), timeoutMs);
+  timer.unref?.();
+  req.once?.('aborted', abort);
+  res.once?.('close', abort);
+  try { return await operation(controller.signal); }
+  finally {
+    clearTimeout(timer);
+    req.removeListener?.('aborted', abort);
+    res.removeListener?.('close', abort);
+  }
+}

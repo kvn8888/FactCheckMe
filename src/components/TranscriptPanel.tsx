@@ -22,7 +22,7 @@ const verdictConfig: Record<Verdict, { label: string; className: string }> = {
     label: 'FALSE',
     className: 'bg-verdict-false text-verdict-false-foreground',
   },
-  partial: {
+  misleading: {
     label: 'MISLEADING',
     className: 'bg-verdict-partial text-verdict-partial-foreground',
   },
