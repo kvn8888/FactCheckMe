@@ -21,7 +21,7 @@ Every paid API route checks authentication on the server. The React sign-in scre
 
 ### Recommended Vercel deployment
 
-1. Create/import the repository as a **Vite** project on Vercel, using Node 22 or newer. `vercel.json` supplies the static output, API route and 120-second function duration.
+1. Create/import the repository as a **Vite** project on Vercel, using Node 24. `vercel.json` supplies the static output, API route and 120-second function duration.
 2. **Before enabling the app**, set Deployment Protection → **Vercel Authentication → All Deployments**. Verify protection covers the production domain, custom domains, preview deployments and direct deployment URLs. Standard Protection does not protect every production URL. Do not create protection bypass/share links.
 3. Verify in a signed-out/private browser that `/`, `/api/auth/session`, `/api/health` and `/api/fact-check` are intercepted by Vercel sign-in. Confirm an authenticated authorized account can reach them.
 4. Only after that verification, set server environment variable `VERCEL_AUTH_PROTECTED=true`. The application also requires Vercel's own `VERCEL=1`. **This flag asserts that protection is already configured; it does not enable or verify Vercel protection.** Do not disable platform protection while this flag is true. No separate application password is needed in this mode.
