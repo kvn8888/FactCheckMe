@@ -13,7 +13,7 @@ export async function endSession(sessionId: string): Promise<ApiResponse<void>> 
   localEndSession(sessionId);
   return { success: true };
 }
-export async function factCheckClaim(claim: string, sessionId: string | null, signal?: AbortSignal): Promise<ApiResponse<FactCheckResult | { noClaim: true }>> {
+export async function factCheckClaim(claim: string, sessionId: string | null, signal?: AbortSignal, options: { context?: string; persist?: boolean } = {}): Promise<ApiResponse<FactCheckResult | { noClaim: true }>> {
   const controller = new AbortController();
   let timedOut = false;
   const cancel = () => controller.abort();
@@ -23,7 +23,7 @@ export async function factCheckClaim(claim: string, sessionId: string | null, si
   const cancellationMessage = () => signal?.aborted ? 'Request cancelled' : timedOut ? 'Fact-check timed out. Please try again.' : 'Failed to fact-check claim';
   try {
     const response = await authenticatedFetch('/api/fact-check', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim }), signal: controller.signal,
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim, ...(options.context ? { context: options.context } : {}) }), signal: controller.signal,
     });
     const data = await response.json();
     if (controller.signal.aborted) return { success: false, error: cancellationMessage() };
@@ -31,7 +31,7 @@ export async function factCheckClaim(claim: string, sessionId: string | null, si
     if (data.noClaim === true) return { success: true, data: { noClaim: true } };
     const result = parseFact(data);
     if (!result) return { success: false, error: 'Invalid fact-check response' };
-    localSaveFact(result, sessionId);
+    if (options.persist !== false) localSaveFact(result, sessionId);
     return { success: true, data: result };
   } catch { return { success: false, error: cancellationMessage() }; }
   finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel); }

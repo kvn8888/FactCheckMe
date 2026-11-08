@@ -31,6 +31,7 @@ export default function Monitor() {
   const {
     isProcessing,
     results,
+    segments,
     sentenceFactChecks,
     status,
     processText,
@@ -47,10 +48,8 @@ export default function Monitor() {
     isFinishing,
     startListening,
     stopListening,
-    partialTranscript,
-    committedTranscripts,
   } = useMaiSTT({
-    onTranscript: processText,
+    onChunk: processText,
     onStopped: () => { void stopMonitoring(); },
     onError: handleError,
   });
@@ -110,8 +109,10 @@ export default function Monitor() {
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_22rem]">
           <TranscriptPanel
-            sentences={committedTranscripts}
-            partialTranscript={partialTranscript}
+            sentences={segments.map(segment => segment.text)}
+            segmentIds={segments.map(segment => segment.id)}
+            provisionalIds={segments.filter(segment => !segment.final).map(segment => segment.id)}
+            partialTranscript=""
             sentenceFactChecks={sentenceFactChecks}
             isListening={isListening}
             onSelectFact={handleSelectFact}

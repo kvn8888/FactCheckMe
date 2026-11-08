@@ -16,7 +16,7 @@ export function encodeWav(samples: Int16Array): Blob {
   samples.forEach((sample, i) => view.setInt16(44 + i * 2, sample, true));
   return new Blob([buffer], { type: 'audio/wav' });
 }
-interface Options { onTranscript: (text: string) => void; onError?: (error: string) => void; onStopped?: () => void }
+interface Options { onTranscript?: (text: string) => void; onChunk?: (text: string) => void; onError?: (error: string) => void; onStopped?: () => void }
 interface Capture {
   stream?: MediaStream; context?: AudioContext; source?: MediaStreamAudioSourceNode; processor?: ScriptProcessorNode;
   samples: number[]; queue: Blob[]; buffer: string; stopping: boolean; controller: AbortController; draining?: Promise<void>;
@@ -41,8 +41,8 @@ export function useMaiSTT(options: Options) {
   const valid = (c: Capture) => mounted.current && current.current === c && !c.controller.signal.aborted;
   const commit = (sentences: string[]) => {
     if (!sentences.length) return;
-    setCommittedTranscripts(previous => [...previous, ...sentences].slice(-500));
-    sentences.forEach(sentence => callbacks.current.onTranscript(sentence));
+    setCommittedTranscripts(previous => [...previous, ...sentences]);
+    sentences.forEach(sentence => callbacks.current.onTranscript?.(sentence));
   };
   const drain = (c: Capture): Promise<void> => {
     if (c.draining) return c.draining;
@@ -57,6 +57,7 @@ export function useMaiSTT(options: Options) {
           const data = await response.json();
           if (!valid(c)) return;
           if (typeof data.text !== 'string') throw new Error('Invalid transcription response');
+          callbacks.current.onChunk?.(data.text.trim());
           c.buffer = [c.buffer, data.text.trim()].filter(Boolean).join(' ');
           const { sentences, remainder } = consumeCompleteSentences(c.buffer);
           c.buffer = remainder; setPartialTranscript(remainder); commit(sentences);

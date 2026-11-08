@@ -10,7 +10,7 @@ A private, browser-based audio fact checker. It records short audio chunks, tran
 - OpenAI **Decisions API**, using `gpt-6-luna` by default, for claim detection, freshness assessment and four-way verdict classification. The tentative name `gpt-6.1-luna` is not the documented Decisions model.
 - Exa **lite** for fast cached evidence. Time-sensitive facts, or uncertain freshness, use **auto** with `maxAgeHours: 0`. Search results are evidence candidates, not ground truth.
 - OpenAI **Responses API** writes a structured explanation using only the retrieved sources. Displayed URLs come from Exa, not model-generated links. Refusals, missing evidence, malformed results and low confidence produce `unverifiable`, never `false` by default.
-- Browser `localStorage` retains up to 500 fact checks and 100 sessions. No server database, Supabase, Hyperspell or server-side transcript history. No raw audio is persisted by the application.
+- Browser `localStorage` retains up to 500 fact checks and 100 sessions with full transcripts, original text chunks and position-based claim mappings. No server database, Supabase, Hyperspell or server-side transcript history. No raw audio is persisted by the application.
 - Browser speech synthesis provides optional read-aloud; available voices depend on the browser/OS and may use their own online services.
 
 Confidence percentages are model estimates, not calibrated guarantees. Check the linked sources, especially for consequential decisions. Source excerpts may omit context. `unverifiable` does not mean false.
@@ -70,18 +70,18 @@ npm run lint
 npm run build
 ```
 
-Open the Vite address (default port 8080), sign in, then click the microphone button. Microphone permission is requested only when recording starts. Stopping flushes pending audio and the final incomplete sentence before closing the local session. Navigating away/signing out aborts capture and discards unsent audio. Recording stops safely if transcription falls behind.
+Open the Vite address (default port 8080), sign in, then click the microphone button. Microphone permission is requested only when recording starts. Stopping flushes pending audio and reconciles claim spans against the completed transcript before closing the local session. Live tail verdicts are provisional: additions revise the same span, superseded responses are ignored, and unchanged text at different positions is checked separately. Punctuation at an audio-chunk boundary is not treated as a reliable claim boundary. Each check includes up to 6,000 characters of surrounding transcript for interpreting references and qualifiers; transcript context is not external evidence. Final reconciliation revisits earlier checks when their surrounding context changed, including spans initially classified as nonclaims. Navigating away/signing out aborts capture and discards unsent audio. Recording stops safely if transcription falls behind.
 
 Provider tests are mocked and spend no API credits. They verify request contracts, evidence safeguards, authentication, request limits, local persistence, cancellation and stop/restart behavior. They do not prove that a particular Azure region/resource, OpenAI account/model or Exa key is provisioned. Perform an authorized live smoke test with a nonsensitive sample after deployment and secret configuration.
 
-History stays in this browser and origin. It does not sync between devices and can be lost if site data is cleared. Existing SQLite/server history is not automatically copied into localStorage. Clearing history affects this browser only. Blocked/full browser storage falls back to memory with a visible warning. Clearing/signing out does not delete provider-side logs or data governed by Azure/OpenAI/Exa policies. No credentials belong in browser history storage.
+History groups checks by session. The full transcript, including nonclaims, stays linked to original text chunks by character offsets; selecting a segment shows its check status, evidence and source chunks. Earlier history without transcript mappings remains readable. History stays in this browser and origin. It does not sync between devices and can be lost if site data is cleared. Existing SQLite/server history is not automatically copied into localStorage. Clearing history affects this browser only. Blocked/full browser storage falls back to memory with a visible warning. Clearing/signing out does not delete provider-side logs or data governed by Azure/OpenAI/Exa policies. No credentials belong in browser history storage.
 
 ## API surface
 
 - `GET /api/auth/session`: authentication mode/status; contains no credentials or history.
 - `POST /api/auth/login`, `POST /api/auth/logout`: password fallback only.
 - `POST /api/transcribe`: authenticated WAV bytes sent as `application/octet-stream` (Vercel binary-body compatibility), maximum 3.5 MB.
-- `POST /api/fact-check`: authenticated JSON `{ "claim": "..." }`, maximum 2,000 characters.
+- `POST /api/fact-check`: authenticated JSON `{ "claim": "...", "context": "..." }`, maximum 2,000 characters for claim and optional 6,000-character context.
 - `GET /api/health`: authenticated service status.
 
 All provider keys stay server-side. API errors and server logs omit provider response bodies, transcripts and credentials. There are no history/session database endpoints or wildcard CORS access.

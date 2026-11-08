@@ -34,9 +34,11 @@ export function createRouteHandler({ factCheck = makeFactCheck, transcribe = tra
     }
     if (req.method === 'POST' && path === '/api/fact-check') {
       rateLimit('factcheck:owner', 30, 60_000);
-      const { claim } = await readJson(req);
+      // Allow UTF-8 and JSON escapes within the validated character limits.
+      const { claim, context } = await readJson(req, 64_000);
       if (typeof claim !== 'string' || !claim.trim() || claim.length > 2000) throw new ApiError(400, 'invalid_claim', 'Claim must contain 1–2000 characters.');
-      const { result, metadata } = await withRequestSignal(req, res, (signal) => factCheck(claim.trim(), { signal }));
+      if (context !== undefined && (typeof context !== 'string' || context.length > 6000)) throw new ApiError(400, 'invalid_context', 'Context must be a string of at most 6000 characters.');
+      const { result, metadata } = await withRequestSignal(req, res, (signal) => factCheck(claim.trim(), { signal, ...(context?.trim() ? { context: context.trim() } : {}) }));
       if (result.hasClaim === false) return json(res, 200, { noClaim: true });
       return json(res, 200, { ...result, id: randomUUID(), timestamp: new Date().toISOString(), fromCache: false, metadata });
     }

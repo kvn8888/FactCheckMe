@@ -17,6 +17,9 @@ export interface FactCheckResult {
   timestamp: Date;
   sources: FactCheckSource[];
   explanation?: string;
+  sessionId?: string;
+  segmentId?: string;
+  revision?: number;
   fromCache?: boolean; // True if provider cache metadata was present
 }
 
@@ -39,12 +42,36 @@ export interface FactCheckStats {
   sessions: SessionRecord[];
 }
 
+export interface TranscriptChunk {
+  id: string;
+  index: number;
+  text: string;
+  start: number;
+  end: number;
+  receivedAt: Date;
+}
+
+export interface TranscriptSegment {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  chunkIds: string[];
+  revision: number;
+  status: 'pending' | 'checked' | 'no-claim' | 'error';
+  factId?: string;
+  final: boolean;
+}
+
 // Session history record
 export interface SessionRecord {
   id: string;
   startedAt: Date;
   endedAt: Date | null;
   claimsChecked: number;
+  transcript?: string;
+  chunks?: TranscriptChunk[];
+  segments?: TranscriptSegment[];
 }
 
 // API Response types

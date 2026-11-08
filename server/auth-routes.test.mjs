@@ -83,6 +83,38 @@ describe('API gate and input limits', () => {
     await route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: ' Earth orbits the Sun ', sessionId: 'browser-only' } }), res);
     expect(factCheck).toHaveBeenCalledWith('Earth orbits the Sun', { signal: expect.any(AbortSignal) }); expect(res.payload.id).toBeTypeOf('string'); expect(res.payload.timestamp).toBeTypeOf('string');
   });
+  it('passes trimmed transcript context without changing the no-claim response', async () => {
+    const factCheck = vi.fn().mockResolvedValue({ result: { hasClaim: false }, metadata: {} });
+    const route = createRouteHandler({ env, factCheck }); const res = response();
+    await route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: ' Hello! ', context: ' Earth orbits the Sun. ' } }), res);
+    expect(factCheck).toHaveBeenCalledWith('Hello!', { context: 'Earth orbits the Sun.', signal: expect.any(AbortSignal) });
+    expect(res.payload).toEqual({ noClaim: true });
+  });
+  it.each([null, 1, false, {}, [], 'x'.repeat(6001)])('rejects invalid JSON context before providers %#', async (context) => {
+    const factCheck = vi.fn(); const route = createRouteHandler({ env, factCheck });
+    await expect(route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: 'An assertion.', context } }), response())).rejects.toMatchObject({ statusCode: 400, code: 'invalid_context' });
+    expect(factCheck).not.toHaveBeenCalled();
+  });
+  it.each(['', '  ', 'x'.repeat(6000)])('accepts empty or maximum-length context %#', async (context) => {
+    const factCheck = vi.fn().mockResolvedValue({ result: { hasClaim: false }, metadata: {} });
+    const route = createRouteHandler({ env, factCheck });
+    await route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: 'An assertion.', context } }), response());
+    expect(factCheck).toHaveBeenCalledWith('An assertion.', { signal: expect.any(AbortSignal), ...(context.trim() ? { context: context.trim() } : {}) });
+  });
+  it.each(['漢', '\u0001'])('accepts maximum-length multibyte or JSON-escaped input %#', async (character) => {
+    const factCheck = vi.fn().mockResolvedValue({ result: { hasClaim: false }, metadata: {} });
+    const route = createRouteHandler({ env, factCheck });
+    const claim = character.repeat(2000); const context = character.repeat(6000);
+    const body = JSON.stringify({ claim, context });
+    expect(Buffer.byteLength(body)).toBeGreaterThan(16000);
+    await route(request('/api/fact-check', { method: 'POST', cookie, body }), response());
+    expect(factCheck).toHaveBeenCalledWith(claim, { context, signal: expect.any(AbortSignal) });
+  });
+  it('still bounds fact-check JSON bodies before provider calls', async () => {
+    const factCheck = vi.fn(); const route = createRouteHandler({ env, factCheck });
+    await expect(route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: 'A claim.', context: 'x'.repeat(64000) } }), response())).rejects.toMatchObject({ statusCode: 413 });
+    expect(factCheck).not.toHaveBeenCalled();
+  });
   it('enforces claim length and WAV signatures before providers', async () => {
     const factCheck = vi.fn(); const transcribe = vi.fn(); const route = createRouteHandler({ env, factCheck, transcribe });
     await expect(route(request('/api/fact-check', { method: 'POST', cookie, body: { claim: 'x'.repeat(2001) } }), response())).rejects.toMatchObject({ statusCode: 400 });

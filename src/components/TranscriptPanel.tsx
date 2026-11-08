@@ -7,6 +7,8 @@ import type { FactCheckResult, Verdict } from '@/types/factCheck';
 
 interface TranscriptPanelProps {
   sentences: string[];
+  segmentIds?: string[];
+  provisionalIds?: string[];
   partialTranscript: string;
   sentenceFactChecks: Record<string, SentenceFactCheck>;
   isListening: boolean;
@@ -43,7 +45,9 @@ function TranscriptSentence({
   sentence,
   assessment,
   onSelectFact,
+  provisional,
 }: {
+  provisional?: boolean;
   sentence: string;
   assessment: SentenceFactCheck | undefined;
   onSelectFact: (result: FactCheckResult) => void;
@@ -58,12 +62,12 @@ function TranscriptSentence({
           'mx-0.5 inline border-b-[3px] border-foreground px-1.5 py-0.5 text-left font-bold transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2',
           config.className,
         )}
-        title={`${config.label}: ${assessment.confidence}% confidence`}
+        title={`${provisional ? "Provisional, awaiting full claim. " : ""}${config.label}: ${assessment.confidence}% confidence`}
         onClick={() => onSelectFact(assessment)}
       >
         {sentence}
         <span className="ml-1 whitespace-nowrap text-[0.58rem] font-black uppercase">
-          [{config.label}]
+          [{provisional ? `${config.label} · LIVE` : config.label}]
         </span>
       </button>
     );
@@ -91,6 +95,8 @@ function TranscriptSentence({
 
 export function TranscriptPanel({
   sentences,
+  segmentIds,
+  provisionalIds = [],
   partialTranscript,
   sentenceFactChecks,
   isListening,
@@ -98,11 +104,12 @@ export function TranscriptPanel({
 }: TranscriptPanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasTranscript = sentences.length > 0 || Boolean(partialTranscript);
+  const transcriptText = sentences.join(' ');
 
   useEffect(() => {
     const scrollArea = scrollRef.current;
     if (scrollArea) scrollArea.scrollTop = scrollArea.scrollHeight;
-  }, [partialTranscript, sentences.length]);
+  }, [partialTranscript, transcriptText]);
 
   return (
     <section className="flex min-h-[22rem] flex-1 flex-col overflow-hidden border-[4px] border-foreground bg-card shadow-brutal">
@@ -136,9 +143,10 @@ export function TranscriptPanel({
           <p className="text-lg font-medium leading-[2.15] text-foreground">
             {sentences.map((sentence, index) => (
               <TranscriptSentence
-                key={`${index}-${sentence}`}
+                key={segmentIds?.[index] ?? `${index}-${sentence}`}
                 sentence={sentence}
-                assessment={sentenceFactChecks[normalizeSentence(sentence)]}
+                provisional={provisionalIds.includes(segmentIds?.[index] ?? "")}
+                assessment={sentenceFactChecks[segmentIds?.[index] ?? normalizeSentence(sentence)]}
                 onSelectFact={onSelectFact}
               />
             ))}

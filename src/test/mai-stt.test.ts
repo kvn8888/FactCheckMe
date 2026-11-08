@@ -34,8 +34,8 @@ describe('MAI chunk capture', () => {
     const first = deferred<ReturnType<typeof response>>();
     const fetchMock = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(response('is blue'));
     vi.stubGlobal('fetch', fetchMock);
-    const onTranscript = vi.fn(); const onStopped = vi.fn();
-    const { result } = renderHook(() => useMaiSTT({ onTranscript, onStopped }));
+    const onTranscript = vi.fn(); const onStopped = vi.fn(); const onChunk = vi.fn();
+    const { result } = renderHook(() => useMaiSTT({ onTranscript, onStopped, onChunk }));
     await act(async () => { await result.current.startListening(); });
     act(() => { audio(); audio(1000); });
     let stopping!: Promise<void>;
@@ -50,6 +50,7 @@ describe('MAI chunk capture', () => {
       expect(options.body.type).toBe('audio/wav');
     }
     expect(onTranscript.mock.calls.map(([text]) => text)).toEqual(['A complete sentence.', 'The sky is blue']);
+    expect(onChunk.mock.calls.map(([text]) => text)).toEqual(['A complete sentence. The sky', 'is blue']);
     expect(onStopped).toHaveBeenCalledTimes(1); expect(result.current.isFinishing).toBe(false);
   });
   it('bounds backlog and stops recording when requests cannot keep up', async () => {
