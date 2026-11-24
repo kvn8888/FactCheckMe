@@ -5,7 +5,7 @@ import { ListenButton } from '@/components/ListenButton';
 import { StatusBar } from '@/components/StatusBar';
 import { FactCard } from '@/components/FactCard';
 import { TranscriptPanel } from '@/components/TranscriptPanel';
-import { useMaiSTT } from '@/hooks/useMaiSTT';
+import { useRealtimeSTT } from '@/hooks/useRealtimeSTT';
 import { useFactChecker } from '@/hooks/useFactChecker';
 import { toast } from 'sonner';
 import type { FactCheckResult } from '@/types/factCheck';
@@ -46,10 +46,11 @@ export default function Monitor() {
     isListening,
     isConnecting,
     isFinishing,
+    partialTranscript,
     startListening,
     stopListening,
-  } = useMaiSTT({
-    onChunk: processText,
+  } = useRealtimeSTT({
+    onTurn: text => processText(text, { source: 'turn' }),
     onStopped: () => { void stopMonitoring(); },
     onError: handleError,
   });
@@ -112,7 +113,7 @@ export default function Monitor() {
             sentences={segments.map(segment => segment.text)}
             segmentIds={segments.map(segment => segment.id)}
             provisionalIds={segments.filter(segment => !segment.final).map(segment => segment.id)}
-            partialTranscript=""
+            partialTranscript={partialTranscript}
             sentenceFactChecks={sentenceFactChecks}
             isListening={isListening}
             onSelectFact={handleSelectFact}

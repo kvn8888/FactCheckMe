@@ -13,7 +13,24 @@ export async function endSession(sessionId: string): Promise<ApiResponse<void>> 
   localEndSession(sessionId);
   return { success: true };
 }
-export async function factCheckClaim(claim: string, sessionId: string | null, signal?: AbortSignal, options: { context?: string; persist?: boolean } = {}): Promise<ApiResponse<FactCheckResult | { noClaim: true }>> {
+export async function createRealtimeSession(sdp: string, signal?: AbortSignal): Promise<string> {
+  const response = await authenticatedFetch('/api/realtime/session', {
+    method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: sdp, signal,
+  });
+  if (!response.ok) throw new Error(response.status === 429 ? 'Too many transcription sessions. Try again later.' : 'Could not connect to live transcription.');
+  const data = await response.json();
+  if (typeof data?.sdp !== 'string' || !/^v=0\r?\n/.test(data.sdp)) throw new Error('Invalid live transcription response.');
+  return data.sdp;
+}
+
+function retryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+export async function factCheckClaim(claim: string, sessionId: string | null, signal?: AbortSignal, options: { context?: string; persist?: boolean; segmentId?: string; revision?: number; requireComplete?: boolean } = {}): Promise<ApiResponse<FactCheckResult | { noClaim: true } | { incomplete: true }>> {
   const controller = new AbortController();
   let timedOut = false;
   const cancel = () => controller.abort();
@@ -23,12 +40,16 @@ export async function factCheckClaim(claim: string, sessionId: string | null, si
   const cancellationMessage = () => signal?.aborted ? 'Request cancelled' : timedOut ? 'Fact-check timed out. Please try again.' : 'Failed to fact-check claim';
   try {
     const response = await authenticatedFetch('/api/fact-check', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim, ...(options.context ? { context: options.context } : {}) }), signal: controller.signal,
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(sessionId ? { 'x-session-id': sessionId } : {}), ...(options.segmentId ? { 'x-segment-id': options.segmentId } : {}), ...(options.revision ? { 'x-segment-revision': String(options.revision) } : {}) }, body: JSON.stringify({ claim, ...(options.context ? { context: options.context } : {}), ...(options.requireComplete ? { requireComplete: true } : {}) }), signal: controller.signal,
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => null);
     if (controller.signal.aborted) return { success: false, error: cancellationMessage() };
-    if (!response.ok) return { success: false, error: typeof data.error === 'string' ? data.error : 'Failed to fact-check claim' };
-    if (data.noClaim === true) return { success: true, data: { noClaim: true } };
+    if (!response.ok) return {
+      success: false, status: response.status, retryAfterMs: retryAfterMs(response.headers?.get('retry-after') ?? null),
+      error: typeof data?.error === 'string' ? data.error : 'Failed to fact-check claim',
+    };
+    if (data?.incomplete === true) return { success: true, data: { incomplete: true } };
+    if (data?.noClaim === true) return { success: true, data: { noClaim: true } };
     const result = parseFact(data);
     if (!result) return { success: false, error: 'Invalid fact-check response' };
     if (options.persist !== false) localSaveFact(result, sessionId);

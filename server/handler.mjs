@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     // Never log request bodies, provider responses, credentials or transcripts.
     if (statusCode >= 500) console.error('FactCheckMe API failure', payload.code);
     if (res.destroyed || res.writableEnded) return;
-    if (!res.headersSent) json(res, statusCode, payload);
+    if (!res.headersSent) json(res, statusCode, payload, statusCode === 429 && Number.isSafeInteger(error.retryAfter) ? { 'Retry-After': String(error.retryAfter) } : {});
     else res.end();
   }
 }

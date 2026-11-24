@@ -14,7 +14,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:server": "vitest run server",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
+    "test:tts-stream": "node scripts/tts-runtime-bench.mjs",
+    "test:live": "node scripts/live-provider-smoke.mjs",
+    "test:live-stt": "node scripts/live-stt-benchmark.mjs",
+    "check": "npm test && npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

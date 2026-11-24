@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAuth, createRateLimiter, hashPassword, requireSameOrigin } from './auth.mjs';
 import { createRouteHandler } from './routes.mjs';
 import { readBody, readJson, withRequestSignal } from './http-utils.mjs';
+import { createRealtimeSession } from './openai.mjs';
 
 const password = 'a test-only password, never a deployed credential';
 const env = { APP_PASSWORD_HASH: hashPassword(password), APP_SESSION_SECRET: 'test-only-session-signing-secret-not-for-deployment' };
@@ -15,6 +16,7 @@ const request = (path, { method = 'GET', body, cookie, origin = 'http://localhos
 };
 const response = () => ({ status: 0, headers: {}, payload: null, writeHead(status, headers) { this.status = status; this.headers = headers; }, end(raw) { this.payload = JSON.parse(raw); } });
 const cookie = createAuth({ env }).login(password).split(';')[0];
+const sdp = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n';
 
 describe('private authentication', () => {
   it('fails closed without configuration', () => {
@@ -143,5 +145,95 @@ describe('API gate and input limits', () => {
     const parsed = request('/'); parsed.body = { a: 'long' };
     await expect(readBody(parsed, 2)).rejects.toMatchObject({ statusCode: 413 });
     await expect(readJson(request('/', { contentType: 'text/plain', body: '{}' }))).rejects.toMatchObject({ statusCode: 415 });
+  });
+});
+
+describe('Realtime transcription session broker', () => {
+  const post = (overrides = {}) => request('/api/realtime/session', { method: 'POST', cookie, body: { sdp }, ...overrides });
+
+  it('requires a same-origin owner before accepting an SDP offer', async () => {
+    const createRealtimeSession = vi.fn();
+    const route = createRouteHandler({ env, createRealtimeSession });
+    await expect(route(post({ cookie: undefined }), response())).rejects.toMatchObject({ statusCode: 401 });
+    await expect(route(post({ origin: 'https://other.example' }), response())).rejects.toMatchObject({ statusCode: 403 });
+    await expect(route(post({ origin: '' }), response())).rejects.toMatchObject({ statusCode: 403 });
+    expect(createRealtimeSession).not.toHaveBeenCalled();
+  });
+
+  it('accepts JSON and raw browser SDP and returns only the SDP answer', async () => {
+    const createRealtimeSession = vi.fn().mockResolvedValue({ sdp, extra: 'server-only' });
+    const telemetry = vi.fn();
+    const route = createRouteHandler({ env, createRealtimeSession, telemetry });
+    for (const req of [post(), post({ contentType: 'application/sdp', body: sdp })]) {
+      const res = response();
+      await route(req, res);
+      expect(res.payload).toEqual({ sdp });
+      expect(res.headers['Cache-Control']).toBe('no-store');
+    }
+    expect(createRealtimeSession).toHaveBeenCalledTimes(2);
+    expect(createRealtimeSession).toHaveBeenCalledWith(sdp, { signal: expect.any(AbortSignal), env });
+    expect(telemetry).toHaveBeenCalledWith('realtime.session.completed', { requestId: expect.any(String), durationMs: expect.any(Number), statusCode: 200 });
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain('m=audio');
+    const health = response();
+    await route(request('/api/health', { cookie }), health);
+    expect(health.payload).toEqual({ ok: true, storage: 'browser', transcription: 'gpt-live-transcribe' });
+  });
+
+  it('rejects invalid or oversized SDP and unsupported media before calling OpenAI', async () => {
+    const createRealtimeSession = vi.fn();
+    const route = createRouteHandler({ env, createRealtimeSession });
+    for (const body of [{}, { sdp: 1 }, { sdp: 'v=0\r\n' }, { sdp: sdp + '\0' }]) {
+      await expect(route(post({ body }), response())).rejects.toMatchObject({ statusCode: 400, code: 'invalid_request' });
+    }
+    await expect(route(post({ contentType: 'application/sdp', body: sdp + 'x'.repeat(64_000) }), response())).rejects.toMatchObject({ statusCode: 413 });
+    await expect(route(post({ contentType: 'text/plain', body: sdp }), response())).rejects.toMatchObject({ statusCode: 415 });
+    expect(createRealtimeSession).not.toHaveBeenCalled();
+  });
+
+  it('limits the owner to 20 exchanges per minute and advertises the reset', async () => {
+    let time = 0;
+    const createRealtimeSession = vi.fn().mockResolvedValue({ sdp });
+    const route = createRouteHandler({ env, createRealtimeSession, rateLimit: createRateLimiter({ now: () => time }) });
+    for (let attempt = 0; attempt < 20; attempt++) await route(post(), response());
+    time = 42_200;
+    await expect(route(post(), response())).rejects.toMatchObject({ statusCode: 429, code: 'rate_limited', retryAfter: 18 });
+    expect(createRealtimeSession).toHaveBeenCalledTimes(20);
+  });
+
+  it('logs only error codes and timings when the upstream rejects the offer', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('secret upstream message', { status: 400 }));
+    const telemetry = vi.fn();
+    const route = createRouteHandler({
+      env: { ...env, OPENAI_API_KEY: 'test-openai-key' }, telemetry,
+      createRealtimeSession: (sdp, options) => createRealtimeSession(sdp, { ...options, fetchImpl }),
+    });
+    await expect(route(post(), response())).rejects.toMatchObject({
+      statusCode: 502, code: 'provider_error', message: 'OpenAI Realtime session could not be created',
+    });
+    expect(telemetry).toHaveBeenCalledWith('realtime.session.failed', {
+      requestId: expect.any(String), durationMs: expect.any(Number), errorCode: 'provider_error', statusCode: 502,
+    });
+  });
+});
+
+describe('Fact-check completion gate route', () => {
+  const post = (requireComplete) => request('/api/fact-check', { method: 'POST', cookie, body: { claim: ' That journey takes ', requireComplete } });
+
+  it('returns incomplete as a successful result and records it without a verdict', async () => {
+    const factCheck = vi.fn().mockResolvedValue({ result: { incomplete: true }, metadata: {} });
+    const telemetry = vi.fn();
+    const route = createRouteHandler({ env, factCheck, telemetry });
+    const res = response();
+    await route(post(true), res);
+    expect(factCheck).toHaveBeenCalledWith('That journey takes', { signal: expect.any(AbortSignal), requireComplete: true });
+    expect(res.payload).toEqual({ incomplete: true });
+    expect(telemetry).toHaveBeenCalledWith('fact_check.completed', expect.objectContaining({ incomplete: true, statusCode: 200 }));
+    expect(telemetry.mock.calls[0][1]).not.toHaveProperty('verdict');
+  });
+
+  it.each([null, 'false', 1, {}])('rejects non-boolean requireComplete values %#', async value => {
+    const factCheck = vi.fn();
+    await expect(createRouteHandler({ env, factCheck })(post(value), response())).rejects.toMatchObject({ statusCode: 400, code: 'invalid_request' });
+    expect(factCheck).not.toHaveBeenCalled();
   });
 });

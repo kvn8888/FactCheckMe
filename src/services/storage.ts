@@ -26,7 +26,7 @@ const factSchema = z.object({
 });
 const id = z.string().min(1).max(200);
 const offset = z.number().int().nonnegative();
-const chunkSchema = z.object({ id, index: offset, text: z.string(), start: offset, end: offset, receivedAt: date });
+const chunkSchema = z.object({ id, index: offset, text: z.string(), start: offset, end: offset, receivedAt: date, source: z.enum(['turn', 'chunk']).optional() });
 const segmentSchema = z.object({
   id, text: z.string(), start: offset, end: offset, chunkIds: z.array(id), revision: offset,
   status: z.enum(['pending', 'checked', 'no-claim', 'error']), factId: id.optional(), final: z.boolean(),

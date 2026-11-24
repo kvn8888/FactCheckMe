@@ -73,6 +73,6 @@ export function createRateLimiter({ now = () => Date.now() } = {}) {
     if (!buckets.has(key) && buckets.size >= 5000) throw new ApiError(429, 'rate_limited', 'Too many requests. Try again later.');
     let bucket = buckets.get(key);
     if (!bucket || bucket.until <= time) { bucket = { count: 0, until: time + windowMs }; buckets.set(key, bucket); }
-    if (++bucket.count > max) throw new ApiError(429, 'rate_limited', 'Too many requests. Try again later.');
+    if (++bucket.count > max) throw new ApiError(429, 'rate_limited', 'Too many requests. Try again later.', { retryAfter: Math.ceil((bucket.until - time) / 1000) });
   };
 }

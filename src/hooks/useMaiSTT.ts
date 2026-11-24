@@ -18,9 +18,10 @@ export function encodeWav(samples: Int16Array): Blob {
 }
 interface Options { onTranscript?: (text: string) => void; onChunk?: (text: string) => void; onError?: (error: string) => void; onStopped?: () => void }
 interface Capture {
+  runId: string; chunkIndex: number;
   stream?: MediaStream; context?: AudioContext; source?: MediaStreamAudioSourceNode; processor?: ScriptProcessorNode;
   samples: number[]; queue: Blob[]; buffer: string; stopping: boolean; controller: AbortController; draining?: Promise<void>;
-  // Fractional resampling state carries across audio callbacks.
+  // Integer-rate resampling state carries across audio callbacks without floating-point drift.
   sum: number; count: number; phase: number;
 }
 function cleanup(c: Capture) {
@@ -52,7 +53,7 @@ export function useMaiSTT(options: Options) {
         const timeout = setTimeout(() => c.controller.abort(), 45000);
         try {
           // Keep WAV bytes opaque to Vercel's automatic request body parser.
-          const response = await authenticatedFetch('/api/transcribe', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: audio, signal: c.controller.signal });
+          const response = await authenticatedFetch('/api/transcribe', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream', 'x-transcript-run-id': c.runId, 'x-transcript-chunk-index': String(c.chunkIndex++) }, body: audio, signal: c.controller.signal });
           if (!response.ok) throw new Error('Transcription failed. Please sign in again or retry.');
           const data = await response.json();
           if (!valid(c)) return;
@@ -89,7 +90,7 @@ export function useMaiSTT(options: Options) {
   const stopListening = () => { const c = current.current; return c ? finish(c) : Promise.resolve(); };
   const startListening = async () => {
     if (current.current || !mounted.current) return false;
-    const c: Capture = { samples: [], queue: [], buffer: '', stopping: false, controller: new AbortController(), sum: 0, count: 0, phase: 0 };
+    const c: Capture = { runId: crypto.randomUUID(), chunkIndex: 0, samples: [], queue: [], buffer: '', stopping: false, controller: new AbortController(), sum: 0, count: 0, phase: 0 };
     current.current = c; setIsConnecting(true); setPartialTranscript(''); setCommittedTranscripts([]);
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) throw new Error('Microphone capture is not supported in this browser');
@@ -100,11 +101,11 @@ export function useMaiSTT(options: Options) {
       c.processor.onaudioprocess = event => {
         if (!valid(c) || c.stopping) return;
         const input = event.inputBuffer.getChannelData(0);
-        const ratio = c.context!.sampleRate / RATE;
+        const inputRate = c.context!.sampleRate;
         for (const value of input) {
-          c.sum += value; c.count++; c.phase++;
-          if (c.phase < ratio) continue;
-          c.phase -= ratio;
+          c.sum += value; c.count++; c.phase += RATE;
+          if (c.phase < inputRate) continue;
+          c.phase -= inputRate;
           const sample = Math.max(-1, Math.min(1, c.sum / c.count)); c.sum = 0; c.count = 0;
           c.samples.push(Math.round(sample * (sample < 0 ? 32768 : 32767)));
           if (c.samples.length === CHUNK_SAMPLES) {

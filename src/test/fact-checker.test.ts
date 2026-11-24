@@ -135,3 +135,22 @@ describe('fact-check session lifecycle', () => {
     expect(vi.mocked(localSaveTranscript).mock.calls.slice(-1)[0]![1].segments[0].status).toBe('error');
   });
 });
+
+describe('what enters claim detection', () => {
+  it.each(['Hello everyone.', 'Is the moon made of cheese?', 'I like blue.', 'The moon is made of cheese.', 'A sentence without punctuation'])('submits %j to server claim detection rather than guessing from wording', async text => {
+    const { result } = renderHook(() => useFactChecker());
+    await act(async () => { await result.current.startMonitoring(); });
+    await act(async () => { result.current.processText(text); await result.current.stopMonitoring(); });
+    expect(factCheckClaim).toHaveBeenCalledWith(text, 'one', expect.any(AbortSignal), expect.objectContaining({ context: text, persist: false, segmentId: 'span-0', revision: 1 }));
+    expect(result.current.segments[0].status).toBe('no-claim');
+    expect(result.current.results).toEqual([]);
+  });
+
+  it('ignores whitespace chunks and input arriving after stop', async () => {
+    const { result } = renderHook(() => useFactChecker());
+    await act(async () => { await result.current.startMonitoring(); });
+    await act(async () => { result.current.processText(' \n '); await result.current.stopMonitoring(); result.current.processText('Too late.'); });
+    expect(factCheckClaim).not.toHaveBeenCalled();
+    expect(result.current.segments).toEqual([]);
+  });
+});

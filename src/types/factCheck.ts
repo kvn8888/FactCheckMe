@@ -49,6 +49,7 @@ export interface TranscriptChunk {
   start: number;
   end: number;
   receivedAt: Date;
+  source?: 'turn' | 'chunk';
 }
 
 export interface TranscriptSegment {
@@ -79,4 +80,6 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  status?: number;
+  retryAfterMs?: number;
 }

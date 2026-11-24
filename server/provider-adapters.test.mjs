@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getMaiConfig, MAX_AUDIO_BYTES, transcribeAudio } from './mai.mjs';
 import { normalizeExaResults, searchEvidence } from './exa.mjs';
-import { extractResponseObject, makeFactCheck } from './openai.mjs';
+import { createRealtimeSession, extractResponseObject, makeFactCheck } from './openai.mjs';
 
 const env = {
   AZURE_SPEECH_ENDPOINT: 'https://speech-test.cognitiveservices.azure.com',
@@ -25,6 +25,33 @@ const sequence = (...data) => {
 };
 const bodyAt = (mock, index) => JSON.parse(mock.mock.calls[index][1].body);
 afterEach(() => vi.restoreAllMocks());
+
+describe('OpenAI Realtime SDP exchange', () => {
+  const sdp = ['v=0', 'o=- 1 1 IN IP4 127.0.0.1', 'm=audio 9 UDP/TLS/RTP/SAVPF 111', 'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', ''].join('\r\n');
+
+  it('attaches the fixed transcription session to the SDP without returning a token', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(sdp, { status: 201 }));
+    expect(await createRealtimeSession(sdp, { env, fetchImpl })).toEqual({ sdp });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://api.openai.com/v1/realtime/calls');
+    expect(init).toMatchObject({ method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, signal: expect.any(AbortSignal) });
+    expect(init.body.get('sdp')).toBe(sdp);
+    expect(JSON.parse(init.body.get('session'))).toEqual({
+      type: 'transcription', audio: { input: { transcription: { model: 'gpt-live-transcribe', delay: 'low' }, turn_detection: null } },
+    });
+  });
+
+  it('fails closed for missing configuration, a timeout, and invalid answers', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('not SDP'));
+    await expect(createRealtimeSession(sdp, { env: {}, fetchImpl })).rejects.toMatchObject({ statusCode: 503, code: 'configuration_error' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(createRealtimeSession(sdp, { env, fetchImpl })).rejects.toMatchObject({ statusCode: 502, code: 'provider_error' });
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort());
+    fetchImpl.mockRejectedValue(new Error(env.OPENAI_API_KEY));
+    await expect(createRealtimeSession(sdp, { env, fetchImpl })).rejects.toMatchObject({ statusCode: 504, code: 'provider_timeout', message: 'OpenAI Realtime request timed out' });
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(25_000);
+  });
+});
 
 describe('MAI file provider', () => {
   it('sends supported multipart file transcription without exposing credentials in a URL', async () => {
@@ -96,6 +123,36 @@ describe('Exa evidence provider', () => {
 });
 
 describe('OpenAI Decisions + evidence + explanation pipeline', () => {
+  const withCompletion = (value) => ({ answers: [...gate().answers, { type: 'predicate', name: 'claim_complete', probability: value }] });
+
+  it('holds a mid-clause fragment before any search or explanation, using the same Decisions call', async () => {
+    const fetchImpl = sequence(withCompletion(0.12));
+    const claim = 'That steady journey takes about 365 days, while';
+    const context = 'Earth orbits the Sun. ' + claim;
+    expect((await makeFactCheck(claim, { env, context, requireComplete: true, fetchImpl })).result).toEqual({ incomplete: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const request = bodyAt(fetchImpl, 0);
+    expect(request.questions.map(({ name }) => name)).toEqual(['checkable', 'needs_fresh_evidence', 'claim_complete']);
+    expect(request.questions[2].instructions).toContain('Missing terminal punctuation');
+    expect(request.questions[2].instructions).toContain('untrusted data');
+    expect(JSON.parse(request.input)).toEqual({ claim, context });
+  });
+
+  it('checks a semantically complete unpunctuated claim using the usual evidence pipeline', async () => {
+    const fetchImpl = sequence(withCompletion(0.5), search, verdict(), summary());
+    expect((await makeFactCheck('Earth orbits the Sun', { env, requireComplete: true, fetchImpl })).result)
+      .toMatchObject({ claim: 'Earth orbits the Sun', verdict: 'true' });
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([gate(), withCompletion('0.2'), withCompletion(2)])('fails safely on missing or malformed completion %#', async response => {
+    const fetchImpl = sequence(response);
+    const { result, metadata } = await makeFactCheck('That journey takes', { env, requireComplete: true, fetchImpl });
+    expect(result).toMatchObject({ verdict: 'unverifiable', confidence: 0 });
+    expect(metadata.reason).toBe('claim_decision_unavailable');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps nonclaims out of search and does not expose a false verdict', async () => {
     const fetchImpl = sequence(gate(0.01));
     const result = await makeFactCheck('Hello!', { env, fetchImpl });
