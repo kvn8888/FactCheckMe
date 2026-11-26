@@ -155,7 +155,7 @@ describe('MAI Streaming WebSocket proxy', () => {
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 16000 },
-            transcription: { model: 'MAI-Transcribe-2-Streaming' },
+            transcription: { model: 'MAI-Transcribe-2-Streaming', language: 'en' },
             turn_detection: null,
           },
         },

@@ -1,3 +1,5 @@
+import type { SharedAudioGraph } from './types';
+
 export const VAD_POLL_MS = 50;
 export const PAUSE_MS = 600;
 export const MIN_SPEECH_MS = 800;
@@ -7,15 +9,22 @@ export const RMS_THRESHOLD = 0.015;
 export class PauseVad {
   private context?: AudioContext;
   private source?: MediaStreamAudioSourceNode;
+  private ownsAudioGraph = false;
   private timer?: ReturnType<typeof setInterval>;
   private speechMs = 0;
   private turnStartedAt?: number;
   private lastSpeechAt?: number;
 
-  async start(stream: MediaStream, signal: AbortSignal, onCommit: () => void): Promise<boolean> {
-    const context = this.context = new AudioContext();
+  async start(
+    stream: MediaStream,
+    signal: AbortSignal,
+    onCommit: () => void,
+    sharedGraph?: SharedAudioGraph,
+  ): Promise<boolean> {
+    const context = this.context = sharedGraph?.context ?? new AudioContext();
     const analyser = context.createAnalyser();
-    this.source = context.createMediaStreamSource(stream);
+    this.ownsAudioGraph = !sharedGraph;
+    this.source = sharedGraph?.source ?? context.createMediaStreamSource(stream);
     this.source.connect(analyser);
     await context.resume();
     if (signal.aborted) {
@@ -64,11 +73,14 @@ export class PauseVad {
   stop(): void {
     clearInterval(this.timer);
     this.timer = undefined;
-    this.source?.disconnect();
-    this.source = undefined;
-    if (this.context && this.context.state !== 'closed') {
-      void this.context.close().catch(() => {});
+    if (this.ownsAudioGraph) {
+      this.source?.disconnect();
+      if (this.context && this.context.state !== 'closed') {
+        void this.context.close().catch(() => {});
+      }
     }
+    this.source = undefined;
     this.context = undefined;
+    this.ownsAudioGraph = false;
   }
 }

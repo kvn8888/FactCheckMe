@@ -23,6 +23,8 @@ export function ListenButton({
       )}
 
       <button
+        type="button"
+        aria-label={isListening ? 'Stop listening' : 'Start listening'}
         onClick={onToggle}
         disabled={disabled}
         className={cn(

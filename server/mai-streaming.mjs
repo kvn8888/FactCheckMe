@@ -206,7 +206,7 @@ export function attachMaiStreamingUpgrade(server, {
           audio: {
             input: {
               format: { type: 'audio/pcm', rate: 16000 },
-              transcription: { model: config.model },
+              transcription: { model: config.model, language: 'en' },
               turn_detection: null,
             },
           },

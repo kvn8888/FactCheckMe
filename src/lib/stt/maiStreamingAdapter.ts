@@ -86,7 +86,8 @@ export class MaiStreamingAdapter implements SttTransportAdapter {
   }
 
   private async startAudioCapture(stream: MediaStream, signal: AbortSignal): Promise<void> {
-    const context = this.context = new AudioContext({ sampleRate: TARGET_RATE });
+    // Use hardware native rate (works reliably on iOS Safari) and downsample cleanly to 16 kHz PCM16.
+    const context = this.context = new AudioContext();
     const source = this.source = context.createMediaStreamSource(stream);
     const processor = this.processor = context.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = event => {
@@ -116,6 +117,11 @@ export class MaiStreamingAdapter implements SttTransportAdapter {
     if (signal.aborted || this.closed) {
       this.stopAudioNodes();
     }
+  }
+
+  getAudioGraph() {
+    if (this.context && this.source) return { context: this.context, source: this.source };
+    return undefined;
   }
 
   private stopAudioNodes(): void {

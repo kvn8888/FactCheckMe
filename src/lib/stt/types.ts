@@ -35,9 +35,15 @@ export class SttUserError extends Error {
   }
 }
 
+export interface SharedAudioGraph {
+  context: AudioContext;
+  source: MediaStreamAudioSourceNode;
+}
+
 export interface SttTransportAdapter {
   readonly id: SttProviderId;
   connect(stream: MediaStream, signal: AbortSignal, callbacks: SttTransportCallbacks): Promise<void>;
+  getAudioGraph?(): SharedAudioGraph | undefined;
   commit(): void;
   stopInput(): void;
   isIdle(): boolean;

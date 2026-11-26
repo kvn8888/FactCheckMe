@@ -139,7 +139,12 @@ export function useRealtimeSTT(options: Options = {}) {
       });
       if (signal.aborted || active.current !== capture) return false;
 
-      const vadStarted = await capture.vad.start(stream, signal, () => commit(capture));
+      const vadStarted = await capture.vad.start(
+        stream,
+        signal,
+        () => commit(capture),
+        capture.adapter.getAudioGraph?.(),
+      );
       if (!vadStarted || signal.aborted || active.current !== capture) return false;
 
       capture.listening = true;

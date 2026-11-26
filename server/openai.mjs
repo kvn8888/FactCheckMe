@@ -52,7 +52,7 @@ export async function createRealtimeSession(sdp, { signal, fetchImpl = globalThi
   body.set('sdp', sdp);
   body.set('session', JSON.stringify({
     type: 'transcription',
-    audio: { input: { transcription: { model: REALTIME_TRANSCRIPTION_MODEL, delay: 'low' }, turn_detection: null } },
+    audio: { input: { transcription: { model: REALTIME_TRANSCRIPTION_MODEL, languages: ['en'], delay: 'low' }, turn_detection: null } },
   }));
   try {
     const response = await fetchImpl('https://api.openai.com/v1/realtime/calls', {

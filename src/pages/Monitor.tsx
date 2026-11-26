@@ -130,11 +130,45 @@ export default function Monitor() {
           <p className="text-xs font-black uppercase text-primary">FactCheckMe</p>
           <h1 className="text-2xl font-black uppercase text-foreground">Audio Fact Checker</h1>
         </div>
-        <div className="flex items-center gap-2 border-[3px] border-foreground bg-muted px-3 py-2 text-xs font-black uppercase shadow-brutal-sm">
-          <span className={isListening ? 'text-destructive' : 'text-muted-foreground'}>
-            {isListening ? '●' : '■'}
-          </span>
-          {monitorLabel}
+        <div className="flex flex-wrap items-center gap-2">
+          {availableProviders.length > 1 && (
+            <div
+              className="flex border-[3px] border-foreground bg-card shadow-brutal-sm"
+              role="radiogroup"
+              aria-label="Transcription engine"
+            >
+              {availableProviders.map((id, index) => {
+                const selected = provider === id;
+                const locked = isListening || isConnecting || isFinishing || isToggling;
+                const shortLabel = id === 'mai-streaming' ? 'MAI WS' : 'OpenAI';
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={locked}
+                    onClick={() => handleSelectProvider(id)}
+                    className={`px-2.5 py-2 text-xs font-black uppercase ${
+                      index > 0 ? 'border-l-[3px] border-foreground' : ''
+                    } ${
+                      selected
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-card text-foreground hover:bg-muted'
+                    } ${locked ? 'cursor-not-allowed opacity-60' : ''}`}
+                  >
+                    {shortLabel}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex items-center gap-2 border-[3px] border-foreground bg-muted px-3 py-2 text-xs font-black uppercase shadow-brutal-sm">
+            <span className={isListening ? 'text-destructive' : 'text-muted-foreground'}>
+              {isListening ? '●' : '■'}
+            </span>
+            {monitorLabel}
+          </div>
         </div>
       </header>
 
@@ -157,42 +191,9 @@ export default function Monitor() {
                 onToggle={handleToggleListening}
                 disabled={isToggling || isConnecting || isFinishing || (!isListening && isProcessing)}
               />
-              {availableProviders.length > 1 ? (
-                <div className="w-full space-y-1.5 border-t-[3px] border-foreground pt-3">
-                  <p className="text-[11px] font-black uppercase text-muted-foreground">
-                    Transcription Engine
-                  </p>
-                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Transcription engine">
-                    {availableProviders.map(id => {
-                      const option = STT_PROVIDERS[id];
-                      const selected = provider === id;
-                      const locked = isListening || isConnecting || isFinishing || isToggling;
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          disabled={locked}
-                          onClick={() => handleSelectProvider(id)}
-                          className={`border-[3px] border-foreground px-2 py-1.5 text-left transition-transform ${
-                            selected
-                              ? 'bg-primary text-primary-foreground shadow-brutal-sm'
-                              : 'bg-card text-foreground hover:bg-muted'
-                          } ${locked ? 'cursor-not-allowed opacity-60' : ''}`}
-                        >
-                          <div className="text-xs font-black uppercase leading-tight">{option.label}</div>
-                          <div className="text-[10px] font-bold uppercase opacity-80">{option.transport}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[11px] font-bold uppercase text-muted-foreground">
-                  {STT_PROVIDERS[provider].label} · {STT_PROVIDERS[provider].transport}
-                </p>
-              )}
+              <p className="text-[11px] font-bold uppercase text-muted-foreground">
+                {STT_PROVIDERS[provider].label} · {STT_PROVIDERS[provider].transport}
+              </p>
             </div>
 
             <StatusBar status={status} />

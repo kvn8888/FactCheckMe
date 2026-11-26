@@ -37,7 +37,7 @@ describe('OpenAI Realtime SDP exchange', () => {
     expect(init).toMatchObject({ method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, signal: expect.any(AbortSignal) });
     expect(init.body.get('sdp')).toBe(sdp);
     expect(JSON.parse(init.body.get('session'))).toEqual({
-      type: 'transcription', audio: { input: { transcription: { model: 'gpt-live-transcribe', delay: 'low' }, turn_detection: null } },
+      type: 'transcription', audio: { input: { transcription: { model: 'gpt-live-transcribe', languages: ['en'], delay: 'low' }, turn_detection: null } },
     });
   });
 
