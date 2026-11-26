@@ -7,16 +7,46 @@ import { FactCard } from '@/components/FactCard';
 import { TranscriptPanel } from '@/components/TranscriptPanel';
 import { useRealtimeSTT } from '@/hooks/useRealtimeSTT';
 import { useFactChecker } from '@/hooks/useFactChecker';
+import { getRealtimeHealth } from '@/services/api';
+import { STT_PROVIDERS, type SttProviderId } from '@/lib/stt/types';
 import { toast } from 'sonner';
 import type { FactCheckResult } from '@/types/factCheck';
 
+const PROVIDER_STORAGE_KEY = 'factcheckme_stt_provider';
+
+function readStoredProvider(): SttProviderId | null {
+  try {
+    const saved = localStorage.getItem(PROVIDER_STORAGE_KEY);
+    return saved === 'openai-realtime' || saved === 'mai-streaming' ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Monitor() {
   const [newResultId, setNewResultId] = useState<string | null>(null);
+  const [availableProviders, setAvailableProviders] = useState<SttProviderId[]>(['openai-realtime']);
+  const [provider, setProvider] = useState<SttProviderId>(() => readStoredProvider() ?? 'openai-realtime');
 
   const toggling = useRef(false);
   const [isToggling, setIsToggling] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void getRealtimeHealth(controller.signal).then(({ providers, defaultProvider }) => {
+      if (controller.signal.aborted) return;
+      setAvailableProviders(providers);
+      setProvider(current => (providers.includes(current) ? current : defaultProvider));
+    });
+    return () => controller.abort();
+  }, []);
+
+  const handleSelectProvider = useCallback((next: SttProviderId) => {
+    setProvider(next);
+    try { localStorage.setItem(PROVIDER_STORAGE_KEY, next); } catch { /* ignore storage errors */ }
+  }, []);
 
   const handleNewResult = useCallback((result: FactCheckResult) => {
     setNewResultId(result.id);
@@ -50,6 +80,7 @@ export default function Monitor() {
     startListening,
     stopListening,
   } = useRealtimeSTT({
+    provider,
     onTurn: text => processText(text, { source: 'turn' }),
     onStopped: () => { void stopMonitoring(); },
     onError: handleError,
@@ -126,6 +157,42 @@ export default function Monitor() {
                 onToggle={handleToggleListening}
                 disabled={isToggling || isConnecting || isFinishing || (!isListening && isProcessing)}
               />
+              {availableProviders.length > 1 ? (
+                <div className="w-full space-y-1.5 border-t-[3px] border-foreground pt-3">
+                  <p className="text-[11px] font-black uppercase text-muted-foreground">
+                    Transcription Engine
+                  </p>
+                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Transcription engine">
+                    {availableProviders.map(id => {
+                      const option = STT_PROVIDERS[id];
+                      const selected = provider === id;
+                      const locked = isListening || isConnecting || isFinishing || isToggling;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={locked}
+                          onClick={() => handleSelectProvider(id)}
+                          className={`border-[3px] border-foreground px-2 py-1.5 text-left transition-transform ${
+                            selected
+                              ? 'bg-primary text-primary-foreground shadow-brutal-sm'
+                              : 'bg-card text-foreground hover:bg-muted'
+                          } ${locked ? 'cursor-not-allowed opacity-60' : ''}`}
+                        >
+                          <div className="text-xs font-black uppercase leading-tight">{option.label}</div>
+                          <div className="text-[10px] font-bold uppercase opacity-80">{option.transport}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] font-bold uppercase text-muted-foreground">
+                  {STT_PROVIDERS[provider].label} · {STT_PROVIDERS[provider].transport}
+                </p>
+              )}
             </div>
 
             <StatusBar status={status} />

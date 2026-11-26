@@ -176,7 +176,13 @@ describe('Realtime transcription session broker', () => {
     expect(JSON.stringify(telemetry.mock.calls)).not.toContain('m=audio');
     const health = response();
     await route(request('/api/health', { cookie }), health);
-    expect(health.payload).toEqual({ ok: true, storage: 'browser', transcription: 'gpt-live-transcribe' });
+    expect(health.payload).toEqual({
+      ok: true,
+      storage: 'browser',
+      transcription: 'gpt-live-transcribe',
+      providers: [],
+      defaultProvider: 'openai-realtime',
+    });
   });
 
   it('rejects invalid or oversized SDP and unsupported media before calling OpenAI', async () => {

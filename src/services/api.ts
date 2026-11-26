@@ -1,4 +1,5 @@
 import type { FactCheckResult, FactCheckStats, ApiResponse } from '@/types/factCheck';
+import type { SttProviderId } from '@/lib/stt/types';
 import { localCreateSession, localEndSession, localSaveFact, localGetFacts, localGetStats, localClear, parseFact } from './storage';
 
 export const AUTH_EXPIRED_EVENT = 'factcheckme:auth-expired';
@@ -13,6 +14,33 @@ export async function endSession(sessionId: string): Promise<ApiResponse<void>> 
   localEndSession(sessionId);
   return { success: true };
 }
+export interface RealtimeHealth {
+  providers: SttProviderId[];
+  defaultProvider: SttProviderId;
+}
+
+const VALID_PROVIDERS = new Set<SttProviderId>(['openai-realtime', 'mai-streaming']);
+
+export async function getRealtimeHealth(signal?: AbortSignal): Promise<RealtimeHealth> {
+  try {
+    const response = await authenticatedFetch('/api/health', { method: 'GET', signal });
+    if (!response.ok) return { providers: ['openai-realtime'], defaultProvider: 'openai-realtime' };
+    const data = await response.json();
+    const providers = Array.isArray(data?.providers)
+      ? data.providers.filter((id: unknown): id is SttProviderId => typeof id === 'string' && VALID_PROVIDERS.has(id as SttProviderId))
+      : [];
+    const defaultProvider: SttProviderId = typeof data?.defaultProvider === 'string' && VALID_PROVIDERS.has(data.defaultProvider as SttProviderId)
+      ? data.defaultProvider as SttProviderId
+      : providers[0] ?? 'openai-realtime';
+    return {
+      providers: providers.length ? providers : [defaultProvider],
+      defaultProvider,
+    };
+  } catch {
+    return { providers: ['openai-realtime'], defaultProvider: 'openai-realtime' };
+  }
+}
+
 export async function createRealtimeSession(sdp: string, signal?: AbortSignal): Promise<string> {
   const response = await authenticatedFetch('/api/realtime/session', {
     method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: sdp, signal,

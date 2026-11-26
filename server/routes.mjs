@@ -4,6 +4,7 @@ import { json, readBody, readJson, withRequestSignal } from './http-utils.mjs';
 import { createAuth, createRateLimiter, requireSameOrigin } from './auth.mjs';
 import { createRealtimeSession as brokerRealtimeSession, isSdp, makeFactCheck, REALTIME_TRANSCRIPTION_MODEL } from './openai.mjs';
 import { transcribeAudio } from './mai.mjs';
+import { getRealtimeProviders } from './mai-streaming.mjs';
 import { createTranscriptLogger, telemetryCorrelation } from './telemetry.mjs';
 
 export function createRouteHandler({ factCheck = makeFactCheck, transcribe = transcribeAudio, createRealtimeSession = brokerRealtimeSession, env = process.env, auth = createAuth({ env }), rateLimit = createRateLimiter(), telemetry = createTranscriptLogger({ env }) } = {}) {
@@ -24,7 +25,10 @@ export function createRouteHandler({ factCheck = makeFactCheck, transcribe = tra
     // Fail closed even for health and unknown routes. All paid upstream calls
     // are behind the same server-side check, not merely the React login screen.
     auth.require(req);
-    if (req.method === 'GET' && path === '/api/health') return json(res, 200, { ok: true, storage: 'browser', transcription: REALTIME_TRANSCRIPTION_MODEL });
+    if (req.method === 'GET' && path === '/api/health') {
+      const { providers, defaultProvider } = getRealtimeProviders(env);
+      return json(res, 200, { ok: true, storage: 'browser', transcription: REALTIME_TRANSCRIPTION_MODEL, providers, defaultProvider });
+    }
     if (req.method === 'POST' && path === '/api/realtime/session') {
       rateLimit('realtime:owner', 20, 60_000);
       const contentType = String(req.headers['content-type'] || '').split(';')[0];
